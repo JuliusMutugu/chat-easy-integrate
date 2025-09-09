@@ -3,6 +3,21 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
 import { v4 as uuidv4 } from 'uuid';
+import {
+  initDatabase,
+  createRoom,
+  getRoomById,
+  getRoomByCode,
+  getRoomByInviteToken,
+  getAllRooms,
+  updateRoomInviteToken,
+  addUserToRoom,
+  removeUserFromRoom,
+  getRoomUsers,
+  getUserBySocketId,
+  saveMessage,
+  getRoomMessages
+} from './database.js';
 
 const app = express();
 const server = createServer(app);
@@ -16,150 +31,237 @@ const io = new Server(server, {
 app.use(cors());
 app.use(express.json());
 
+// Initialize database
+await initDatabase();
+
 // Serve static files from client build
 app.use(express.static('client/dist'));
 
-// Store active rooms and users
-const rooms = new Map();
-const users = new Map();
+// Store active socket connections (for real-time features)
+const activeConnections = new Map(); // socketId -> { roomId, username }
 
 // API Routes
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-app.post('/api/rooms', (req, res) => {
-  const { name, description, maxUsers = 10 } = req.body;
-  const roomId = uuidv4();
-  
-  rooms.set(roomId, {
-    id: roomId,
-    name,
-    description,
-    maxUsers,
-    users: new Set(),
-    messages: [],
-    createdAt: new Date(),
-    isNegotiationActive: false
-  });
-  
-  res.json({ roomId, name, description });
-});
-
-app.get('/api/rooms', (req, res) => {
-  const roomList = Array.from(rooms.values()).map(room => ({
-    id: room.id,
-    name: room.name,
-    description: room.description,
-    userCount: room.users.size,
-    maxUsers: room.maxUsers,
-    isNegotiationActive: room.isNegotiationActive,
-    createdAt: room.createdAt
-  }));
-  
-  res.json(roomList);
-});
-
-app.get('/api/rooms/:roomId', (req, res) => {
-  const { roomId } = req.params;
-  const room = rooms.get(roomId);
-  
-  if (!room) {
-    return res.status(404).json({ error: 'Room not found' });
+app.post('/api/rooms', async (req, res) => {
+  try {
+    const { name, description, maxUsers = 10 } = req.body;
+    const serverUrl = `${req.protocol}://${req.get('host')}`;
+    
+    const room = await createRoom({ name, description, maxUsers }, serverUrl);
+    
+    res.json({
+      roomId: room.id,
+      roomCode: room.code,
+      name: room.name,
+      description: room.description,
+      inviteToken: room.inviteToken,
+      inviteLink: room.inviteLink
+    });
+  } catch (error) {
+    console.error('Error creating room:', error);
+    res.status(500).json({ error: 'Failed to create room' });
   }
-  
-  res.json({
-    id: room.id,
-    name: room.name,
-    description: room.description,
-    userCount: room.users.size,
-    maxUsers: room.maxUsers,
-    isNegotiationActive: room.isNegotiationActive,
-    createdAt: room.createdAt
-  });
 });
 
-app.post('/api/rooms/:roomId/invite', (req, res) => {
-  const { roomId } = req.params;
-  const { inviterName, inviteMessage } = req.body;
-  const room = rooms.get(roomId);
-  
-  if (!room) {
-    return res.status(404).json({ error: 'Room not found' });
+function generateRoomCode() {
+  // Generate a 6-character alphanumeric code
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let code = '';
+  for (let i = 0; i < 6; i++) {
+    code += chars.charAt(Math.floor(Math.random() * chars.length));
   }
-  
-  const inviteData = {
-    roomId,
-    roomName: room.name,
-    roomDescription: room.description,
-    inviterName,
-    message: inviteMessage || `Join me in ${room.name}!`,
-    inviteLink: `${req.protocol}://${req.get('host')}?room=${roomId}&invite=true`,
-    timestamp: new Date()
-  };
-  
-  res.json(inviteData);
+  // Ensure uniqueness
+  if (roomCodes.has(code)) {
+    return generateRoomCode(); // Recursive retry if duplicate
+  }
+  return code;
+}
+
+function generateInviteToken() {
+  // Generate a secure invite token
+  const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let token = '';
+  for (let i = 0; i < 32; i++) {
+    token += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  // Ensure uniqueness
+  if (inviteLinks.has(token)) {
+    return generateInviteToken(); // Recursive retry if duplicate
+  }
+  return token;
+}
+
+app.get('/api/rooms', async (req, res) => {
+  try {
+    const rooms = await getAllRooms();
+    res.json(rooms);
+  } catch (error) {
+    console.error('Error fetching rooms:', error);
+    res.status(500).json({ error: 'Failed to fetch rooms' });
+  }
+});
+
+app.get('/api/rooms/:roomId', async (req, res) => {
+  try {
+    const { roomId } = req.params;
+    const room = await getRoomById(roomId);
+    
+    if (!room) {
+      return res.status(404).json({ error: 'Room not found' });
+    }
+    
+    res.json(room);
+  } catch (error) {
+    console.error('Error fetching room:', error);
+    res.status(500).json({ error: 'Failed to fetch room' });
+  }
+});
+
+app.get('/api/rooms/code/:roomCode', async (req, res) => {
+  try {
+    const { roomCode } = req.params;
+    const room = await getRoomByCode(parseInt(roomCode));
+    
+    if (!room) {
+      return res.status(404).json({ error: 'Room not found with this code' });
+    }
+    
+    res.json(room);
+  } catch (error) {
+    console.error('Error fetching room by code:', error);
+    res.status(500).json({ error: 'Failed to fetch room' });
+  }
+});
+
+// New endpoint for invite token lookup
+app.get('/api/rooms/invite/:inviteToken', async (req, res) => {
+  try {
+    const { inviteToken } = req.params;
+    const room = await getRoomByInviteToken(inviteToken);
+    
+    if (!room) {
+      return res.status(404).json({ error: 'Invalid or expired invitation link' });
+    }
+    
+    res.json(room);
+  } catch (error) {
+    console.error('Error fetching room by invite token:', error);
+    res.status(500).json({ error: 'Failed to fetch room' });
+  }
+});
+
+// Generate new invite link for existing room
+app.post('/api/rooms/:roomId/invite', async (req, res) => {
+  try {
+    const { roomId } = req.params;
+    const serverUrl = `${req.protocol}://${req.get('host')}`;
+    
+    const room = await getRoomById(roomId);
+    if (!room) {
+      return res.status(404).json({ error: 'Room not found' });
+    }
+    
+    const { inviteToken, inviteLink } = await updateRoomInviteToken(roomId, serverUrl);
+    
+    res.json({
+      inviteToken,
+      inviteLink,
+      roomCode: room.code,
+      roomName: room.name
+    });
+  } catch (error) {
+    console.error('Error generating new invite:', error);
+    res.status(500).json({ error: 'Failed to generate new invite' });
+  }
+});
+
+// Frontend route handler for invite links
+app.get('/invite/:inviteToken', async (req, res) => {
+  try {
+    const { inviteToken } = req.params;
+    const room = await getRoomByInviteToken(inviteToken);
+    
+    if (!room) {
+      // Redirect to main page with error
+      return res.redirect('/?error=invalid-invite');
+    }
+    
+    // Redirect to main page with invite token
+    res.redirect(`/?invite=${inviteToken}`);
+  } catch (error) {
+    console.error('Error handling invite link:', error);
+    res.redirect('/?error=invite-error');
+  }
 });
 
 // Socket.IO Events
 io.on('connection', (socket) => {
   console.log('User connected:', socket.id);
 
-  socket.on('join-room', ({ roomId, username }) => {
-    const room = rooms.get(roomId);
-    if (!room) {
-      socket.emit('error', { message: 'Room not found' });
-      return;
-    }
+  socket.on('join-room', async ({ roomId, username }) => {
+    try {
+      const room = await getRoomById(roomId);
+      if (!room) {
+        socket.emit('error', { message: 'Room not found' });
+        return;
+      }
 
-    if (room.users.size >= room.maxUsers) {
-      socket.emit('error', { message: 'Room is full' });
-      return;
-    }
+      if (room.userCount >= room.maxUsers) {
+        socket.emit('error', { message: 'Room is full' });
+        return;
+      }
 
-    // Store user info
-    users.set(socket.id, { username, roomId });
-    room.users.add(socket.id);
-    
-    socket.join(roomId);
-    
-    // Send existing messages to new user
-    socket.emit('message-history', room.messages);
-    
-    // Notify room about new user
-    socket.to(roomId).emit('user-joined', { username, userId: socket.id });
-    
-    // Send updated room info
-    io.to(roomId).emit('room-update', {
-      userCount: room.users.size,
-      users: Array.from(room.users).map(id => users.get(id)?.username).filter(Boolean)
-    });
+      // Store user info in database and active connections
+      await addUserToRoom(roomId, socket.id, username);
+      activeConnections.set(socket.id, { roomId, username });
+      
+      socket.join(roomId);
+      
+      // Send existing messages to new user
+      const messages = await getRoomMessages(roomId);
+      socket.emit('message-history', messages);
+      
+      // Notify room about new user
+      socket.to(roomId).emit('user-joined', { username, userId: socket.id });
+      
+      // Send updated room info
+      const users = await getRoomUsers(roomId);
+      io.to(roomId).emit('room-update', {
+        userCount: users.length,
+        users: users.map(u => u.username)
+      });
+    } catch (error) {
+      console.error('Error joining room:', error);
+      socket.emit('error', { message: 'Failed to join room' });
+    }
   });
 
-  socket.on('send-message', ({ message, type = 'text' }) => {
-    const user = users.get(socket.id);
-    if (!user) return;
+  socket.on('send-message', async ({ message, type = 'text' }) => {
+    try {
+      const connection = activeConnections.get(socket.id);
+      if (!connection) return;
 
-    const room = rooms.get(user.roomId);
-    if (!room) return;
+      const { roomId, username } = connection;
+      const room = await getRoomById(roomId);
+      if (!room) return;
 
-    const messageData = {
-      id: uuidv4(),
-      username: user.username,
-      message,
-      type,
-      timestamp: new Date(),
-      userId: socket.id
-    };
+      // Save message to database
+      const messageData = await saveMessage(roomId, username, message);
+      
+      // Add additional data for real-time
+      const fullMessageData = {
+        ...messageData,
+        type,
+        userId: socket.id
+      };
 
-    room.messages.push(messageData);
-    
-    // Keep only last 100 messages
-    if (room.messages.length > 100) {
-      room.messages = room.messages.slice(-100);
+      io.to(roomId).emit('new-message', fullMessageData);
+    } catch (error) {
+      console.error('Error sending message:', error);
     }
-
-    io.to(user.roomId).emit('new-message', messageData);
   });
 
   socket.on('start-negotiation', ({ proposal }) => {
@@ -229,32 +331,54 @@ io.on('connection', (socket) => {
     socket.to(roomId).emit('user-stop-typing', { username });
   });
 
-  socket.on('disconnect', () => {
-    const user = users.get(socket.id);
-    if (user) {
-      const room = rooms.get(user.roomId);
-      if (room) {
-        room.users.delete(socket.id);
-        socket.to(user.roomId).emit('user-left', { username: user.username });
+  socket.on('disconnect', async () => {
+    try {
+      const connection = activeConnections.get(socket.id);
+      if (connection) {
+        const { roomId, username } = connection;
         
-        // Send updated room info
-        io.to(user.roomId).emit('room-update', {
-          userCount: room.users.size,
-          users: Array.from(room.users).map(id => users.get(id)?.username).filter(Boolean)
-        });
-
-        // Clean up empty rooms
-        if (room.users.size === 0) {
-          rooms.delete(user.roomId);
+        // Remove user from database
+        const removedUser = await removeUserFromRoom(socket.id);
+        
+        if (removedUser) {
+          socket.to(roomId).emit('user-left', { username });
+          
+          // Send updated room info
+          const users = await getRoomUsers(roomId);
+          io.to(roomId).emit('room-update', {
+            userCount: users.length,
+            users: users.map(u => u.username)
+          });
         }
+        
+        activeConnections.delete(socket.id);
       }
-      users.delete(socket.id);
+      console.log('User disconnected:', socket.id);
+    } catch (error) {
+      console.error('Error handling disconnect:', error);
     }
-    console.log('User disconnected:', socket.id);
   });
 });
 
 const PORT = process.env.PORT || 3000;
+
+// Handle port in use error
 server.listen(PORT, () => {
   console.log(`🚀 Messaging platform server running on http://localhost:${PORT}`);
+}).on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.log(`❌ Port ${PORT} is in use, trying port ${PORT + 1}...`);
+    server.listen(PORT + 1, () => {
+      console.log(`🚀 Messaging platform server running on http://localhost:${PORT + 1}`);
+    }).on('error', (err2) => {
+      if (err2.code === 'EADDRINUSE') {
+        console.log(`❌ Port ${PORT + 1} is also in use, trying port ${PORT + 2}...`);
+        server.listen(PORT + 2, () => {
+          console.log(`🚀 Messaging platform server running on http://localhost:${PORT + 2}`);
+        });
+      }
+    });
+  } else {
+    console.error('Server error:', err);
+  }
 });

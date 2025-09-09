@@ -16,39 +16,11 @@
     const urlParams = new URLSearchParams(window.location.search);
     const roomId = urlParams.get('room');
     const isInvite = urlParams.get('invite');
-    const inviteToken = urlParams.get('invite');
-    const errorParam = urlParams.get('error');
     
-    if (errorParam === 'invalid-invite') {
-      alert('Invalid or expired invitation link.');
-      return;
-    }
-    
-    if (inviteToken && inviteToken !== 'true') {
-      // New invite token system
-      handleInviteToken(inviteToken);
-    } else if (roomId && isInvite) {
-      // Legacy invite system
+    if (roomId && isInvite) {
       handleInviteLink(roomId);
     }
   });
-
-  async function handleInviteToken(inviteToken) {
-    try {
-      const response = await fetch(`${config.serverUrl}/api/rooms/invite/${inviteToken}`);
-      if (response.ok) {
-        inviteRoom = await response.json();
-        showModule = true;
-      } else {
-        alert('Invalid or expired invitation link.');
-      }
-    } catch (error) {
-      alert('Failed to load room from invitation link.');
-    }
-    
-    // Clean up URL
-    window.history.replaceState({}, document.title, window.location.pathname);
-  }
 
   async function handleInviteLink(roomId) {
     try {
@@ -78,24 +50,17 @@
   }
 
   async function handleQuickJoin() {
-    if (!quickJoinCode) return;
+    if (!quickJoinCode.trim()) return;
     
     try {
-      // Convert to number for validation
-      const roomCode = parseInt(quickJoinCode);
-      if (isNaN(roomCode) || roomCode < 100000 || roomCode > 999999) {
-        alert('Please enter a valid 6-digit room code.');
-        return;
-      }
-      
-      const response = await fetch(`${config.serverUrl}/api/rooms/code/${roomCode}`);
+      const response = await fetch(`${config.serverUrl}/api/rooms/code/${quickJoinCode.trim()}`);
       if (response.ok) {
         const room = await response.json();
         inviteRoom = room;
         showModule = true;
         quickJoinCode = '';
       } else {
-        alert('Room code not found. Please check the code and try again.');
+        alert('Invalid room code. Please check and try again.');
       }
     } catch (error) {
       alert('Failed to join room. Please try again.');
@@ -132,15 +97,12 @@
           
           <div class="quick-join">
             <input 
-              type="number"
               bind:value={quickJoinCode}
-              placeholder="Enter 6-digit room code..."
+              placeholder="Enter room code..."
               class="code-input"
-              min="100000"
-              max="999999"
               onkeypress={(e) => e.key === 'Enter' && handleQuickJoin()}
             />
-            <button class="join-code-btn" onclick={handleQuickJoin} disabled={!quickJoinCode}>
+            <button class="join-code-btn" onclick={handleQuickJoin} disabled={!quickJoinCode.trim()}>
               Join
             </button>
           </div>

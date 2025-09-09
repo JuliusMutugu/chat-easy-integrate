@@ -17,21 +17,64 @@
 
   function showInvite(room) {
     selectedRoom = room;
-    inviteLink = `${window.location.origin}?room=${room.id}&invite=true`;
+    // Use the persistent invite link from the server
+    inviteLink = room.inviteLink || `${window.location.origin}?room=${room.id}&invite=true`;
     showInviteModal = true;
+  }
+
+  async function generateNewInviteLink() {
+    if (!selectedRoom) return;
+    
+    try {
+      const response = await fetch(`${config.serverUrl}/api/rooms/${selectedRoom.id}/invite`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({})
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        inviteLink = data.inviteLink;
+        showToast('New invite link generated!');
+      } else {
+        showToast('Failed to generate new invite link.');
+      }
+    } catch (error) {
+      showToast('Error generating invite link.');
+    }
   }
 
   function copyInviteLink() {
     navigator.clipboard.writeText(inviteLink);
-    // Show toast notification
     showToast('Invite link copied to clipboard!');
+  }
+
+  function copyRoomCode() {
+    navigator.clipboard.writeText(selectedRoom.code);
+    showToast('Room code copied to clipboard!');
   }
 
   function sendEmailInvite() {
     if (!inviteEmail.trim()) return;
     
-    const subject = `Join ${selectedRoom.name} on Messaging Platform`;
-    const body = `You've been invited to join "${selectedRoom.name}"!\n\nClick here to join: ${inviteLink}\n\nDescription: ${selectedRoom.description}`;
+    const subject = `Join ${selectedRoom.name} - Room Code: ${selectedRoom.code}`;
+    const body = `🎯 You're invited to join "${selectedRoom.name}"!
+
+📋 Quick Join Options:
+• Room Code: ${selectedRoom.code}
+• Direct Link: ${inviteLink}
+
+📝 Description: ${selectedRoom.description}
+
+💡 How to join:
+1. Visit the messaging platform
+2. Enter room code: ${selectedRoom.code}
+3. Or click the direct link above
+
+Looking forward to chatting with you! 😊`;
+    
     const mailtoLink = `mailto:${inviteEmail}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
     
     window.open(mailtoLink);
@@ -132,6 +175,11 @@
           
           <p class="room-description">{room.description}</p>
           
+          <div class="room-code-badge">
+            <span class="code-label">Code:</span>
+            <span class="code-value">{room.code}</span>
+          </div>
+          
           <div class="room-stats">
             <span class="user-count">👥 {room.userCount}/{room.maxUsers}</span>
             <span class="room-status" class:full={room.userCount >= room.maxUsers}>
@@ -164,10 +212,25 @@
         
         <div class="modal-content">
           <div class="invite-section">
-            <h4>🔗 Share Link</h4>
+            <h4>🎯 Room Code</h4>
+            <div class="code-container">
+              <div class="room-code-display">
+                <span class="room-code">{selectedRoom.code}</span>
+                <small>Share this code for easy access</small>
+              </div>
+              <button class="copy-btn" onclick={copyRoomCode}>📋 Copy Code</button>
+            </div>
+          </div>
+
+          <div class="invite-section">
+            <h4>🔗 Direct Link</h4>
             <div class="link-container">
               <input type="text" readonly value={inviteLink} class="invite-link-input" />
-              <button class="copy-btn" onclick={copyInviteLink}>📋 Copy</button>
+              <button class="copy-btn" onclick={copyInviteLink}>📋 Copy Link</button>
+            </div>
+            <div class="link-actions">
+              <button class="generate-btn" onclick={generateNewInviteLink}>🔄 Generate New Link</button>
+              <small class="link-note">Generate a new link if security is compromised</small>
             </div>
           </div>
 
@@ -191,16 +254,31 @@
           </div>
 
           <div class="invite-section">
-            <h4>📱 Quick Share</h4>
+            <h4>📱 Share on Social Platforms</h4>
             <div class="quick-share">
-              <button class="share-btn whatsapp" onclick={() => window.open(`https://wa.me/?text=${encodeURIComponent('Join me in ' + selectedRoom.name + ': ' + inviteLink)}`)}>
+              <button class="share-btn whatsapp" onclick={() => window.open(`https://wa.me/?text=${encodeURIComponent(`🎯 Join me in "${selectedRoom.name}"!\n\n💬 Room Code: ${selectedRoom.code}\n🔗 Direct Link: ${inviteLink}\n\n📝 ${selectedRoom.description}`)}`)}>
                 💬 WhatsApp
               </button>
-              <button class="share-btn telegram" onclick={() => window.open(`https://t.me/share/url?url=${encodeURIComponent(inviteLink)}&text=${encodeURIComponent('Join ' + selectedRoom.name)}`)}>
+              <button class="share-btn telegram" onclick={() => window.open(`https://t.me/share/url?url=${encodeURIComponent(inviteLink)}&text=${encodeURIComponent(`🎯 Join "${selectedRoom.name}"!\n💬 Room Code: ${selectedRoom.code}`)}`)}>
                 ✈️ Telegram
               </button>
-              <button class="share-btn twitter" onclick={() => window.open(`https://twitter.com/intent/tweet?text=${encodeURIComponent('Join me for a discussion: ' + selectedRoom.name)}&url=${encodeURIComponent(inviteLink)}`)}>
+              <button class="share-btn twitter" onclick={() => window.open(`https://twitter.com/intent/tweet?text=${encodeURIComponent(`🎯 Join me for a discussion in "${selectedRoom.name}"!\n💬 Room Code: ${selectedRoom.code}`)}&url=${encodeURIComponent(inviteLink)}`)}>
                 🐦 Twitter
+              </button>
+              <button class="share-btn messenger" onclick={() => window.open(`https://www.facebook.com/dialog/send?link=${encodeURIComponent(inviteLink)}&app_id=YOUR_APP_ID`)}>
+                📧 Messenger
+              </button>
+            </div>
+          </div>
+
+          <div class="invite-section">
+            <h4>📋 Quick Copy Messages</h4>
+            <div class="quick-messages">
+              <button class="message-btn" onclick={() => {navigator.clipboard.writeText(`Hey! Join me in "${selectedRoom.name}" - Room Code: ${selectedRoom.code}`); showToast('Message copied!');}}>
+                💬 Simple Message
+              </button>
+              <button class="message-btn" onclick={() => {navigator.clipboard.writeText(`🎯 You're invited to join "${selectedRoom.name}"!\n\n💬 Room Code: ${selectedRoom.code}\n🔗 Link: ${inviteLink}\n\n📝 ${selectedRoom.description}`); showToast('Detailed message copied!');}}>
+                📄 Detailed Message
               </button>
             </div>
           </div>
@@ -421,6 +499,28 @@
     overflow: hidden;
   }
 
+  .room-code-badge {
+    background: #f1f3f4;
+    border: 1px solid #e1e5e9;
+    border-radius: 6px;
+    padding: 6px 10px;
+    margin-bottom: 15px;
+    text-align: center;
+    font-size: 13px;
+  }
+
+  .code-label {
+    color: #666;
+    margin-right: 5px;
+  }
+
+  .code-value {
+    font-family: 'Courier New', monospace;
+    font-weight: bold;
+    color: #333;
+    letter-spacing: 1px;
+  }
+
   .room-stats {
     display: flex;
     justify-content: space-between;
@@ -544,6 +644,35 @@
     font-size: 1em;
   }
 
+  .code-container {
+    display: flex;
+    gap: 15px;
+    align-items: center;
+  }
+
+  .room-code-display {
+    flex: 1;
+    text-align: center;
+    padding: 15px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border-radius: 12px;
+    color: white;
+  }
+
+  .room-code {
+    display: block;
+    font-size: 24px;
+    font-weight: bold;
+    font-family: 'Courier New', monospace;
+    letter-spacing: 3px;
+    margin-bottom: 5px;
+  }
+
+  .room-code-display small {
+    font-size: 12px;
+    opacity: 0.9;
+  }
+
   .link-container, .email-container {
     display: flex;
     gap: 10px;
@@ -588,9 +717,39 @@
     transform: none;
   }
 
+  .link-actions {
+    margin-top: 10px;
+    text-align: center;
+  }
+
+  .generate-btn {
+    background: #8b5cf6;
+    color: white;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 500;
+    transition: all 0.3s;
+    margin-bottom: 5px;
+  }
+
+  .generate-btn:hover {
+    background: #7c3aed;
+    transform: translateY(-1px);
+  }
+
+  .link-note {
+    display: block;
+    color: #6b7280;
+    font-size: 12px;
+    margin-top: 5px;
+  }
+
   .quick-share {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
     gap: 10px;
   }
 
@@ -620,9 +779,40 @@
     color: white;
   }
 
+  .share-btn.messenger {
+    background: #006aff;
+    color: white;
+  }
+
   .share-btn:hover {
     transform: translateY(-2px);
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  }
+
+  .quick-messages {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .message-btn {
+    flex: 1;
+    min-width: 150px;
+    background: #f8f9fa;
+    border: 2px solid #e1e5e9;
+    color: #333;
+    padding: 10px 15px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    transition: all 0.3s;
+  }
+
+  .message-btn:hover {
+    border-color: #667eea;
+    background: #f0f2ff;
+    transform: translateY(-1px);
   }
 
   /* Global Toast Styles */

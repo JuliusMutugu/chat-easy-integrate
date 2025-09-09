@@ -13,16 +13,25 @@
     "install-all": "npm install && cd client && npm install"
   },
   "dependencies": {
+    "cors": "^2.8.5",
     "express": "^4.18.2",
     "socket.io": "^4.7.2",
-    "cors": "^2.8.5",
+    "sqlite": "^5.1.1",
+    "sqlite3": "^5.1.7",
     "uuid": "^9.0.0"
   },
   "devDependencies": {
-    "nodemon": "^3.0.1",
-    "concurrently": "^8.2.0"
+    "concurrently": "^8.2.0",
+    "nodemon": "^3.0.1"
   },
-  "keywords": ["messaging", "chat", "real-time", "negotiation", "svelte", "nodejs"],
+  "keywords": [
+    "messaging",
+    "chat",
+    "real-time",
+    "negotiation",
+    "svelte",
+    "nodejs"
+  ],
   "author": "",
   "license": "MIT"
 }
