@@ -15,6 +15,8 @@
   let showNegotiationForm = false;
   let negotiationProposal = '';
   let messagesContainer;
+  let typingUsers = [];
+  let typingTimeout;
 
   onMount(() => {
     if (socket) {
@@ -122,6 +124,16 @@
       currentNegotiation = null;
       scrollToBottom();
     });
+
+    socket.on('user-typing', (data) => {
+      if (data.username !== config.username) {
+        typingUsers = [...typingUsers.filter(u => u !== data.username), data.username];
+      }
+    });
+
+    socket.on('user-stop-typing', (data) => {
+      typingUsers = typingUsers.filter(u => u !== data.username);
+    });
   }
 
   function removeSocketListeners() {
@@ -150,6 +162,16 @@
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
       sendMessage();
+    } else {
+      // Handle typing indicator
+      if (socket && newMessage.trim()) {
+        socket.emit('typing', { roomId: room.id, username: config.username });
+        
+        clearTimeout(typingTimeout);
+        typingTimeout = setTimeout(() => {
+          socket.emit('stop-typing', { roomId: room.id, username: config.username });
+        }, 1000);
+      }
     }
   }
 
@@ -288,6 +310,24 @@
         {/if}
       </div>
     {/each}
+
+    {#if typingUsers.length > 0}
+      <div class="typing-indicator">
+        <div class="typing-content">
+          <div class="typing-dots">
+            <span></span>
+            <span></span>
+            <span></span>
+          </div>
+          <span class="typing-text">
+            {typingUsers.length === 1 
+              ? `${typingUsers[0]} is typing...` 
+              : `${typingUsers.slice(0, 2).join(', ')}${typingUsers.length > 2 ? ` and ${typingUsers.length - 2} others` : ''} are typing...`
+            }
+          </span>
+        </div>
+      </div>
+    {/if}
   </div>
 
   <div class="message-input">
@@ -570,6 +610,44 @@
 
   .system-icon {
     font-size: 14px;
+  }
+
+  .typing-indicator {
+    align-self: flex-start;
+    margin-bottom: 10px;
+  }
+
+  .typing-content {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: #f1f3f4;
+    padding: 8px 12px;
+    border-radius: 15px;
+    font-size: 13px;
+    color: #666;
+  }
+
+  .typing-dots {
+    display: flex;
+    gap: 2px;
+  }
+
+  .typing-dots span {
+    width: 4px;
+    height: 4px;
+    background: #667eea;
+    border-radius: 50%;
+    animation: typing 1.4s ease-in-out infinite;
+  }
+
+  .typing-dots span:nth-child(1) { animation-delay: 0s; }
+  .typing-dots span:nth-child(2) { animation-delay: 0.2s; }
+  .typing-dots span:nth-child(3) { animation-delay: 0.4s; }
+
+  @keyframes typing {
+    0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+    30% { transform: translateY(-6px); opacity: 1; }
   }
 
   .message-input {

@@ -53,10 +53,52 @@ app.get('/api/rooms', (req, res) => {
     description: room.description,
     userCount: room.users.size,
     maxUsers: room.maxUsers,
-    isNegotiationActive: room.isNegotiationActive
+    isNegotiationActive: room.isNegotiationActive,
+    createdAt: room.createdAt
   }));
   
   res.json(roomList);
+});
+
+app.get('/api/rooms/:roomId', (req, res) => {
+  const { roomId } = req.params;
+  const room = rooms.get(roomId);
+  
+  if (!room) {
+    return res.status(404).json({ error: 'Room not found' });
+  }
+  
+  res.json({
+    id: room.id,
+    name: room.name,
+    description: room.description,
+    userCount: room.users.size,
+    maxUsers: room.maxUsers,
+    isNegotiationActive: room.isNegotiationActive,
+    createdAt: room.createdAt
+  });
+});
+
+app.post('/api/rooms/:roomId/invite', (req, res) => {
+  const { roomId } = req.params;
+  const { inviterName, inviteMessage } = req.body;
+  const room = rooms.get(roomId);
+  
+  if (!room) {
+    return res.status(404).json({ error: 'Room not found' });
+  }
+  
+  const inviteData = {
+    roomId,
+    roomName: room.name,
+    roomDescription: room.description,
+    inviterName,
+    message: inviteMessage || `Join me in ${room.name}!`,
+    inviteLink: `${req.protocol}://${req.get('host')}?room=${roomId}&invite=true`,
+    timestamp: new Date()
+  };
+  
+  res.json(inviteData);
 });
 
 // Socket.IO Events
@@ -177,6 +219,14 @@ io.on('connection', (socket) => {
         details: votes
       });
     }
+  });
+
+  socket.on('typing', ({ roomId, username }) => {
+    socket.to(roomId).emit('user-typing', { username });
+  });
+
+  socket.on('stop-typing', ({ roomId, username }) => {
+    socket.to(roomId).emit('user-stop-typing', { username });
   });
 
   socket.on('disconnect', () => {

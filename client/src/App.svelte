@@ -1,4 +1,5 @@
 <script>
+  import { onMount } from 'svelte';
   import MessagingModule from './lib/MessagingModule.svelte';
   
   let showModule = false;
@@ -7,13 +8,44 @@
     username: 'User' + Math.floor(Math.random() * 1000),
     theme: 'modern'
   };
+  let inviteRoom = null;
+
+  onMount(() => {
+    // Check for invitation link in URL
+    const urlParams = new URLSearchParams(window.location.search);
+    const roomId = urlParams.get('room');
+    const isInvite = urlParams.get('invite');
+    
+    if (roomId && isInvite) {
+      handleInviteLink(roomId);
+    }
+  });
+
+  async function handleInviteLink(roomId) {
+    try {
+      const response = await fetch(`${config.serverUrl}/api/rooms/${roomId}`);
+      if (response.ok) {
+        inviteRoom = await response.json();
+        showModule = true;
+      } else {
+        alert('Invitation link is invalid or room no longer exists.');
+      }
+    } catch (error) {
+      alert('Failed to load room from invitation link.');
+    }
+    
+    // Clean up URL
+    window.history.replaceState({}, document.title, window.location.pathname);
+  }
 
   function toggleModule() {
     showModule = !showModule;
+    inviteRoom = null; // Reset invite room when manually opening
   }
 
   function handleClose() {
     showModule = false;
+    inviteRoom = null;
   }
 </script>
 
@@ -45,15 +77,39 @@
     </div>
 
     <div class="features">
-      <h3>✨ Features</h3>
-      <ul>
-        <li>🏠 Create and join chat rooms</li>
-        <li>💬 Real-time messaging</li>
-        <li>🤝 Group negotiation with voting</li>
-        <li>👥 User presence indicators</li>
-        <li>📱 Responsive design</li>
-        <li>🔧 Easy integration</li>
-      </ul>
+      <h3>✨ Enhanced Features</h3>
+      <div class="feature-grid">
+        <div class="feature-card">
+          <div class="feature-icon">🏠</div>
+          <h4>Smart Room Management</h4>
+          <p>Create and join rooms with enhanced UI</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">📤</div>
+          <h4>Easy Invitations</h4>
+          <p>Share links, email invites, and social sharing</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">💬</div>
+          <h4>Real-time Chat</h4>
+          <p>Instant messaging with Socket.IO</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">🤝</div>
+          <h4>Group Negotiations</h4>
+          <p>Built-in voting system for decisions</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">👥</div>
+          <h4>User Presence</h4>
+          <p>See who's online in real-time</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">📱</div>
+          <h4>Responsive Design</h4>
+          <p>Works perfectly on all devices</p>
+        </div>
+      </div>
     </div>
 
     <div class="integration-example">
@@ -73,7 +129,7 @@
   </div>
 
   {#if showModule}
-    <MessagingModule {config} onClose={handleClose} />
+    <MessagingModule {config} {inviteRoom} onClose={handleClose} />
   {/if}
 </main>
 
@@ -181,18 +237,44 @@
     color: #333;
   }
 
-  .features ul {
-    list-style: none;
+  .feature-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-    gap: 10px;
+    gap: 20px;
   }
 
-  .features li {
-    padding: 10px;
-    background: #f8f9fa;
-    border-radius: 8px;
+  .feature-card {
+    background: white;
+    border: 1px solid #e1e5e9;
+    border-radius: 12px;
+    padding: 20px;
+    text-align: center;
+    transition: all 0.3s;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  }
+
+  .feature-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+    border-color: #667eea;
+  }
+
+  .feature-icon {
+    font-size: 2.5em;
+    margin-bottom: 15px;
+  }
+
+  .feature-card h4 {
+    margin: 0 0 10px 0;
+    color: #333;
+    font-size: 1.1em;
+  }
+
+  .feature-card p {
+    margin: 0;
+    color: #666;
     font-size: 14px;
+    line-height: 1.4;
   }
 
   .integration-example {
@@ -226,8 +308,13 @@
       align-items: stretch;
     }
     
-    .features ul {
-      grid-template-columns: 1fr;
+    .feature-grid {
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 15px;
+    }
+
+    .feature-card {
+      padding: 15px;
     }
   }
 </style>

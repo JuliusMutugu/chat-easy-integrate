@@ -10,6 +10,7 @@
     username: 'User',
     theme: 'modern'
   };
+  export let inviteRoom = null;
   export let onClose = () => {};
 
   let socket = null;
@@ -21,6 +22,11 @@
 
   onMount(() => {
     connectToServer();
+    
+    // If there's an invite room, show it prominently
+    if (inviteRoom) {
+      currentView = 'rooms';
+    }
   });
 
   onDestroy(() => {
@@ -110,6 +116,7 @@
         <RoomList 
           {rooms} 
           {config}
+          {inviteRoom}
           onCreateRoom={handleCreateRoom}
           onJoinRoom={handleJoinRoom}
           onRefresh={loadRooms}
