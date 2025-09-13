@@ -2,6 +2,7 @@
   export let rooms = [];
   export const config = {};
   export let inviteRoom = null;
+  export let isInvitedUser = false;
   export let onCreateRoom = () => {};
   export let onJoinRoom = () => {};
   export let onRefresh = () => {};
@@ -168,21 +169,25 @@
 
 <div class="room-list">
   <div class="room-list-header">
-    <h3>🏠 Available Rooms</h3>
+    <h3>🏠 {isInvitedUser ? 'Join Your Room' : 'Available Rooms'}</h3>
     <div class="header-actions">
       <button class="refresh-btn" onclick={onRefresh}>🔄</button>
-      <button class="create-btn" onclick={onCreateRoom}>➕ Create Room</button>
+      {#if !isInvitedUser}
+        <button class="create-btn" onclick={onCreateRoom}>➕ Create Room</button>
+      {/if}
     </div>
   </div>
 
   {#if rooms.length === 0}
     <div class="empty-state">
       <div class="empty-icon">🏠</div>
-      <h4>No rooms available</h4>
-      <p>Create the first room to start chatting!</p>
-      <button class="create-first-btn" onclick={onCreateRoom}
-        >Create Room</button
-      >
+      <h4>{isInvitedUser ? 'Room not found' : 'No rooms available'}</h4>
+      <p>{isInvitedUser ? 'The room you were invited to may no longer exist.' : 'Create the first room to start chatting!'}</p>
+      {#if !isInvitedUser}
+        <button class="create-first-btn" onclick={onCreateRoom}
+          >Create Room</button
+        >
+      {/if}
     </div>
   {:else}
     {#if inviteRoom}
@@ -228,7 +233,7 @@
     {/if}
 
     <div class="rooms-grid">
-      {#each rooms as room}
+      {#each (isInvitedUser && inviteRoom ? [inviteRoom] : rooms) as room}
         <div
           class="room-card"
           class:negotiation-active={room.isNegotiationActive}
@@ -239,13 +244,15 @@
               {#if room.isNegotiationActive}
                 <span class="negotiation-badge">🤝 Negotiating</span>
               {/if}
-              <button
-                class="invite-btn"
-                onclick={() => showInvite(room)}
-                title="Invite others"
-              >
-                Invite
-              </button>
+              {#if !isInvitedUser}
+                <button
+                  class="invite-btn"
+                  onclick={() => showInvite(room)}
+                  title="Invite others"
+                >
+                  Invite
+                </button>
+              {/if}
             </div>
           </div>
 
@@ -420,7 +427,32 @@
                     `https://t.me/share/url?url=${encodeURIComponent(inviteLink)}&text=${encodeURIComponent(`🎯 Join "${selectedRoom.name}"!\n💬 Room Code: ${selectedRoom.code}`)}`
                   )}
               >
-                  <svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 256 256" {...$$props}><!-- Icon from SVG Logos by Gil Barbara - https://raw.githubusercontent.com/gilbarbara/logos/master/LICENSE.txt --><defs><linearGradient id="SVGuySfwdaH" x1="50%" x2="50%" y1="0%" y2="100%"><stop offset="0%" stop-color="#2AABEE"/><stop offset="100%" stop-color="#229ED9"/></linearGradient></defs><path fill="url(#SVGuySfwdaH)" d="M128 0C94.06 0 61.48 13.494 37.5 37.49A128.04 128.04 0 0 0 0 128c0 33.934 13.5 66.514 37.5 90.51C61.48 242.506 94.06 256 128 256s66.52-13.494 90.5-37.49c24-23.996 37.5-56.576 37.5-90.51s-13.5-66.514-37.5-90.51C194.52 13.494 161.94 0 128 0"/><path fill="#FFF" d="M57.94 126.648q55.98-24.384 74.64-32.152c35.56-14.786 42.94-17.354 47.76-17.441c1.06-.017 3.42.245 4.96 1.49c1.28 1.05 1.64 2.47 1.82 3.467c.16.996.38 3.266.2 5.038c-1.92 20.24-10.26 69.356-14.5 92.026c-1.78 9.592-5.32 12.808-8.74 13.122c-7.44.684-13.08-4.912-20.28-9.63c-11.26-7.386-17.62-11.982-28.56-19.188c-12.64-8.328-4.44-12.906 2.76-20.386c1.88-1.958 34.64-31.748 35.26-34.45c.08-.338.16-1.598-.6-2.262c-.74-.666-1.84-.438-2.64-.258c-1.14.256-19.12 12.152-54 35.686c-5.1 3.508-9.72 5.218-13.88 5.128c-4.56-.098-13.36-2.584-19.9-4.708c-8-2.606-14.38-3.984-13.82-8.41c.28-2.304 3.46-4.662 9.52-7.072"/></svg>
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="1em"
+                  height="1em"
+                  viewBox="0 0 256 256"
+                  {...$$props}
+                  ><!-- Icon from SVG Logos by Gil Barbara - https://raw.githubusercontent.com/gilbarbara/logos/master/LICENSE.txt --><defs
+                    ><linearGradient
+                      id="SVGuySfwdaH"
+                      x1="50%"
+                      x2="50%"
+                      y1="0%"
+                      y2="100%"
+                      ><stop offset="0%" stop-color="#2AABEE" /><stop
+                        offset="100%"
+                        stop-color="#229ED9"
+                      /></linearGradient
+                    ></defs
+                  ><path
+                    fill="url(#SVGuySfwdaH)"
+                    d="M128 0C94.06 0 61.48 13.494 37.5 37.49A128.04 128.04 0 0 0 0 128c0 33.934 13.5 66.514 37.5 90.51C61.48 242.506 94.06 256 128 256s66.52-13.494 90.5-37.49c24-23.996 37.5-56.576 37.5-90.51s-13.5-66.514-37.5-90.51C194.52 13.494 161.94 0 128 0"
+                  /><path
+                    fill="#FFF"
+                    d="M57.94 126.648q55.98-24.384 74.64-32.152c35.56-14.786 42.94-17.354 47.76-17.441c1.06-.017 3.42.245 4.96 1.49c1.28 1.05 1.64 2.47 1.82 3.467c.16.996.38 3.266.2 5.038c-1.92 20.24-10.26 69.356-14.5 92.026c-1.78 9.592-5.32 12.808-8.74 13.122c-7.44.684-13.08-4.912-20.28-9.63c-11.26-7.386-17.62-11.982-28.56-19.188c-12.64-8.328-4.44-12.906 2.76-20.386c1.88-1.958 34.64-31.748 35.26-34.45c.08-.338.16-1.598-.6-2.262c-.74-.666-1.84-.438-2.64-.258c-1.14.256-19.12 12.152-54 35.686c-5.1 3.508-9.72 5.218-13.88 5.128c-4.56-.098-13.36-2.584-19.9-4.708c-8-2.606-14.38-3.984-13.82-8.41c.28-2.304 3.46-4.662 9.52-7.072"
+                  /></svg
+                >
               </button>
               <button
                 class="share-btn twitter"
@@ -429,7 +461,40 @@
                     `https://twitter.com/intent/tweet?text=${encodeURIComponent(`🎯 Join me for a discussion in "${selectedRoom.name}"!\n💬 Room Code: ${selectedRoom.code}`)}&url=${encodeURIComponent(inviteLink)}`
                   )}
               >
-                <svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" {...$$props}><!-- Icon from Material Line Icons by Vjacheslav Trushkin - https://github.com/cyberalien/line-md/blob/master/license.txt --><g fill="currentColor"><path d="M1 2h2.5L3.5 2h-2.5zM5.5 2h2.5L7.2 2h-2.5z"><animate fill="freeze" attributeName="d" dur="0.4s" values="M1 2h2.5L3.5 2h-2.5zM5.5 2h2.5L7.2 2h-2.5z;M1 2h2.5L18.5 22h-2.5zM5.5 2h2.5L23 22h-2.5z"/></path><path d="M3 2h5v0h-5zM16 22h5v0h-5z"><animate fill="freeze" attributeName="d" begin="0.4s" dur="0.4s" values="M3 2h5v0h-5zM16 22h5v0h-5z;M3 2h5v2h-5zM16 22h5v-2h-5z"/></path><path d="M18.5 2h3.5L22 2h-3.5z"><animate fill="freeze" attributeName="d" begin="0.5s" dur="0.4s" values="M18.5 2h3.5L22 2h-3.5z;M18.5 2h3.5L5 22h-3.5z"/></path></g></svg>
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="1em"
+                  height="1em"
+                  viewBox="0 0 24 24"
+                  {...$$props}
+                  ><!-- Icon from Material Line Icons by Vjacheslav Trushkin - https://github.com/cyberalien/line-md/blob/master/license.txt --><g
+                    fill="currentColor"
+                    ><path d="M1 2h2.5L3.5 2h-2.5zM5.5 2h2.5L7.2 2h-2.5z"
+                      ><animate
+                        fill="freeze"
+                        attributeName="d"
+                        dur="0.4s"
+                        values="M1 2h2.5L3.5 2h-2.5zM5.5 2h2.5L7.2 2h-2.5z;M1 2h2.5L18.5 22h-2.5zM5.5 2h2.5L23 22h-2.5z"
+                      /></path
+                    ><path d="M3 2h5v0h-5zM16 22h5v0h-5z"
+                      ><animate
+                        fill="freeze"
+                        attributeName="d"
+                        begin="0.4s"
+                        dur="0.4s"
+                        values="M3 2h5v0h-5zM16 22h5v0h-5z;M3 2h5v2h-5zM16 22h5v-2h-5z"
+                      /></path
+                    ><path d="M18.5 2h3.5L22 2h-3.5z"
+                      ><animate
+                        fill="freeze"
+                        attributeName="d"
+                        begin="0.5s"
+                        dur="0.4s"
+                        values="M18.5 2h3.5L22 2h-3.5z;M18.5 2h3.5L5 22h-3.5z"
+                      /></path
+                    ></g
+                  ></svg
+                >
               </button>
               <button
                 class="share-btn messenger"
@@ -438,7 +503,17 @@
                     `https://www.facebook.com/dialog/send?link=${encodeURIComponent(inviteLink)}&app_id=YOUR_APP_ID`
                   )}
               >
-                  <svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 14 14" {...$$props}><!-- Icon from Flex color icons by Streamline - https://creativecommons.org/licenses/by/4.0/ --><path fill="#8fbffa" d="M3.677 13.107a3.166 3.166 0 0 1-2.783-2.79C.78 9.242.682 8.138.682 7.013s.097-2.23.212-3.304A3.166 3.166 0 0 1 3.677.919C4.758.799 5.868.695 7 .695s2.242.103 3.323.224a3.166 3.166 0 0 1 2.783 2.79c.115 1.075.212 2.179.212 3.304s-.097 2.229-.212 3.304a3.166 3.166 0 0 1-2.783 2.79q-.63.07-1.273.127a.493.493 0 0 1-.534-.494v-2.695h1.522a.5.5 0 0 0 .5-.5V8.018a.5.5 0 0 0-.5-.5H8.516v-1.01a1.01 1.01 0 0 1 1.011-1.011h.511a.5.5 0 0 0 .5-.5V3.98a1.01 1.01 0 0 0-1.01-1.01h-.506a3.033 3.033 0 0 0-3.033 3.032v1.516H4.467a.5.5 0 0 0-.5.5v1.527a.5.5 0 0 0 .5.5H5.99v2.735a.49.49 0 0 1-.524.494a42 42 0 0 1-1.788-.167Z"/></svg>
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="1em"
+                  height="1em"
+                  viewBox="0 0 14 14"
+                  {...$$props}
+                  ><!-- Icon from Flex color icons by Streamline - https://creativecommons.org/licenses/by/4.0/ --><path
+                    fill="#8fbffa"
+                    d="M3.677 13.107a3.166 3.166 0 0 1-2.783-2.79C.78 9.242.682 8.138.682 7.013s.097-2.23.212-3.304A3.166 3.166 0 0 1 3.677.919C4.758.799 5.868.695 7 .695s2.242.103 3.323.224a3.166 3.166 0 0 1 2.783 2.79c.115 1.075.212 2.179.212 3.304s-.097 2.229-.212 3.304a3.166 3.166 0 0 1-2.783 2.79q-.63.07-1.273.127a.493.493 0 0 1-.534-.494v-2.695h1.522a.5.5 0 0 0 .5-.5V8.018a.5.5 0 0 0-.5-.5H8.516v-1.01a1.01 1.01 0 0 1 1.011-1.011h.511a.5.5 0 0 0 .5-.5V3.98a1.01 1.01 0 0 0-1.01-1.01h-.506a3.033 3.033 0 0 0-3.033 3.032v1.516H4.467a.5.5 0 0 0-.5.5v1.527a.5.5 0 0 0 .5.5H5.99v2.735a.49.49 0 0 1-.524.494a42 42 0 0 1-1.788-.167Z"
+                  /></svg
+                >
               </button>
             </div>
           </div>

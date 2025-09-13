@@ -12,6 +12,7 @@
     theme: "modern",
   };
   export let inviteRoom = null;
+  export let isInvitedUser = false;
   export let onClose = () => {};
 
   let socket = null;
@@ -118,6 +119,7 @@
           {rooms}
           {config}
           {inviteRoom}
+          {isInvitedUser}
           onCreateRoom={handleCreateRoom}
           onJoinRoom={handleJoinRoom}
           onRefresh={loadRooms}

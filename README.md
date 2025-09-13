@@ -40,12 +40,15 @@ A lightweight, embeddable messaging module for group negotiations and temporary 
 ## 📦 Integration
 
 ### 🚀 Quick Start (5 minutes)
+
 Want to add chat to your existing app? Check out our **[Quick Start Guide](./QUICK_START.md)** for copy-paste code examples.
 
 ### 🔌 Full Integration Guide
+
 For comprehensive integration options including React, Vue, WordPress, and mobile apps, see our **[Integration Guide](./INTEGRATION_GUIDE.md)**.
 
 ### 📡 API Documentation
+
 For backend integration and custom implementations, check the **[API Documentation](./API_DOCS.md)**.
 
 ### Basic Usage
@@ -81,7 +84,7 @@ function handleClose() {
 This messaging platform can enhance any application:
 
 - **🛒 E-commerce**: Customer support chat, order discussions
-- **📚 Education**: Study groups, student-teacher communication  
+- **📚 Education**: Study groups, student-teacher communication
 - **💼 Business**: Team collaboration, client meetings
 - **🏥 Healthcare**: Patient-doctor consultations, team coordination
 - **🎮 Gaming**: Player communication, guild chat

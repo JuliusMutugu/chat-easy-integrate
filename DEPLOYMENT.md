@@ -10,6 +10,7 @@
 ### Option 1: Using render.yaml (Recommended)
 
 1. **Connect GitHub Repository**:
+
    - Go to your Render dashboard
    - Click "New" → "Blueprint"
    - Connect your GitHub repository
@@ -27,16 +28,19 @@
 ### Option 2: Manual Setup
 
 1. **Create Web Service**:
+
    - Go to Render dashboard
    - Click "New" → "Web Service"
    - Connect your GitHub repository
 
 2. **Configure Build & Deploy**:
+
    - **Build Command**: `npm run install-all && npm run build`
    - **Start Command**: `npm start`
    - **Health Check Path**: `/api/health`
 
 3. **Set Environment Variables**:
+
    ```
    NODE_ENV=production
    DATABASE_URL=/opt/render/project/src/data/messaging.db
@@ -64,7 +68,7 @@
 ✅ Live location sharing  
 ✅ Persistent SQLite database  
 ✅ Invite system with shareable links  
-✅ Responsive design for mobile/desktop  
+✅ Responsive design for mobile/desktop
 
 ## Local Development
 
@@ -94,6 +98,7 @@ npm start
 ## Support
 
 If you encounter issues, check:
+
 - Render service logs in the dashboard
 - Network tab in browser dev tools for connection issues
 - Console logs for client-side errors

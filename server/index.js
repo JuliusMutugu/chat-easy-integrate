@@ -2,6 +2,9 @@ import express from "express";
 import { createServer } from "http";
 import { Server } from "socket.io";
 import cors from "cors";
+import multer from "multer";
+import path from "path";
+import fs from "fs";
 import { v4 as uuidv4 } from "uuid";
 import {
   initDatabase,
@@ -21,7 +24,7 @@ import {
 
 // Environment configuration
 const PORT = process.env.PORT || 3000;
-const NODE_ENV = process.env.NODE_ENV || 'development';
+const NODE_ENV = process.env.NODE_ENV || "development";
 const CLIENT_URL = process.env.CLIENT_URL || `http://localhost:${PORT}`;
 const CORS_ORIGIN = process.env.CORS_ORIGIN || "*";
 
@@ -34,10 +37,45 @@ const io = new Server(server, {
   },
 });
 
-app.use(cors({
-  origin: CORS_ORIGIN
-}));
+app.use(
+  cors({
+    origin: CORS_ORIGIN,
+  })
+);
 app.use(express.json());
+
+// Create uploads directory if it doesn't exist
+const uploadsDir = "uploads";
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
+
+// Configure multer for file uploads
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    cb(null, uploadsDir);
+  },
+  filename: function (req, file, cb) {
+    // Generate unique filename with original extension
+    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
+    cb(null, uniqueSuffix + path.extname(file.originalname));
+  },
+});
+
+const upload = multer({
+  storage: storage,
+  limits: {
+    fileSize: 10 * 1024 * 1024, // 10MB limit
+  },
+  fileFilter: function (req, file, cb) {
+    // Accept only PDF files
+    if (file.mimetype === "application/pdf") {
+      cb(null, true);
+    } else {
+      cb(new Error("Only PDF files are allowed!"), false);
+    }
+  },
+});
 
 // Initialize database
 await initDatabase();
@@ -57,7 +95,8 @@ app.post("/api/rooms", async (req, res) => {
   try {
     const { name, description, maxUsers = 10 } = req.body;
     // Use environment variable in production, fallback to request URL
-    const serverUrl = process.env.SERVER_URL || `${req.protocol}://${req.get("host")}`;
+    const serverUrl =
+      process.env.SERVER_URL || `${req.protocol}://${req.get("host")}`;
 
     const room = await createRoom({ name, description, maxUsers }, serverUrl);
 
@@ -170,7 +209,8 @@ app.post("/api/rooms/:roomId/invite", async (req, res) => {
   try {
     const { roomId } = req.params;
     // Use environment variable in production, fallback to request URL
-    const serverUrl = process.env.SERVER_URL || `${req.protocol}://${req.get("host")}`;
+    const serverUrl =
+      process.env.SERVER_URL || `${req.protocol}://${req.get("host")}`;
 
     const room = await getRoomById(roomId);
     if (!room) {
@@ -210,6 +250,49 @@ app.get("/invite/:inviteToken", async (req, res) => {
   } catch (error) {
     console.error("Error handling invite link:", error);
     res.redirect("/?error=invite-error");
+  }
+});
+
+// File upload routes
+app.post("/api/upload/pdf", upload.single("pdf"), (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: "No PDF file uploaded" });
+    }
+
+    // Return file information
+    res.json({
+      filename: req.file.filename,
+      originalName: req.file.originalname,
+      size: req.file.size,
+      url: `/api/files/${req.file.filename}`,
+    });
+  } catch (error) {
+    console.error("Error uploading file:", error);
+    res.status(500).json({ error: "Failed to upload file" });
+  }
+});
+
+// Serve uploaded files
+app.get("/api/files/:filename", (req, res) => {
+  try {
+    const filename = req.params.filename;
+    const filePath = path.join(uploadsDir, filename);
+
+    // Check if file exists
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ error: "File not found" });
+    }
+
+    // Set appropriate headers for PDF
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `inline; filename="${filename}"`);
+
+    // Send the file
+    res.sendFile(path.resolve(filePath));
+  } catch (error) {
+    console.error("Error serving file:", error);
+    res.status(500).json({ error: "Failed to serve file" });
   }
 });
 
@@ -301,6 +384,43 @@ io.on("connection", (socket) => {
       io.to(roomId).emit("new-message", fullMessageData);
     } catch (error) {
       console.error("Error sending message:", error);
+    }
+  });
+
+  socket.on("send-file", async ({ fileInfo, message = "" }) => {
+    try {
+      const connection = activeConnections.get(socket.id);
+      if (!connection) return;
+
+      const { roomId, username } = connection;
+      const room = await getRoomById(roomId);
+      if (!room) return;
+
+      // Save file message to database
+      const fileData = {
+        url: fileInfo.url,
+        fileName: fileInfo.originalName,
+        size: fileInfo.size,
+      };
+
+      const messageData = await saveMessage(
+        roomId, 
+        username, 
+        message || `Shared a PDF: ${fileInfo.originalName}`, 
+        'file', 
+        fileData
+      );
+
+      // Add additional data for real-time broadcast
+      const fullMessageData = {
+        ...messageData,
+        type: 'file',
+        userId: socket.id,
+      };
+
+      io.to(roomId).emit("new-message", fullMessageData);
+    } catch (error) {
+      console.error("Error sending file:", error);
     }
   });
 

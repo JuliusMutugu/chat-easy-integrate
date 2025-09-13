@@ -10,6 +10,7 @@
     theme: "modern",
   };
   let inviteRoom = null;
+  let isInvitedUser = false;
   let quickJoinCode = "";
 
   onMount(() => {
@@ -41,6 +42,7 @@
       );
       if (response.ok) {
         inviteRoom = await response.json();
+        isInvitedUser = true;
         showModule = true;
       } else {
         alert("Invalid or expired invitation link.");
@@ -58,6 +60,7 @@
       const response = await fetch(`${config.serverUrl}/api/rooms/${roomId}`);
       if (response.ok) {
         inviteRoom = await response.json();
+        isInvitedUser = true;
         showModule = true;
       } else {
         alert("Invitation link is invalid or room no longer exists.");
@@ -73,11 +76,13 @@
   function toggleModule() {
     showModule = !showModule;
     inviteRoom = null; // Reset invite room when manually opening
+    isInvitedUser = false; // Reset invited user status
   }
 
   function handleClose() {
     showModule = false;
     inviteRoom = null;
+    isInvitedUser = false;
   }
 
   async function handleQuickJoin() {
@@ -97,6 +102,7 @@
       if (response.ok) {
         const room = await response.json();
         inviteRoom = room;
+        isInvitedUser = true;
         showModule = true;
         quickJoinCode = "";
       } else {
@@ -114,7 +120,8 @@
       <div class="hero-text">
         <h1>💬 Connect & Negotiate</h1>
         <p class="hero-subtitle">
-          Streamlining your negotiation and group decision making with ease (plan to automate the entire thing to work with any messaging app)
+          Streamlining your negotiation and group decision making with ease
+          (plan to automate the entire thing to work with any messaging app)
         </p>
 
         <div class="hero-stats">
@@ -276,7 +283,7 @@
   </div>
 
   {#if showModule}
-    <MessagingModule {config} {inviteRoom} onClose={handleClose} />
+    <MessagingModule {config} {inviteRoom} {isInvitedUser} onClose={handleClose} />
   {/if}
 </main>
 

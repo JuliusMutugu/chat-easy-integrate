@@ -7,7 +7,8 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Database configuration
-const DATABASE_URL = process.env.DATABASE_URL || path.join(__dirname, "messaging.db");
+const DATABASE_URL =
+  process.env.DATABASE_URL || path.join(__dirname, "messaging.db");
 
 // Database connection
 let db = null;
@@ -20,11 +21,13 @@ export async function initDatabase() {
       dbPath = DATABASE_URL;
       // Ensure the directory exists for absolute paths (like Render)
       const dbDir = path.dirname(dbPath);
-      await import('fs').then(fs => fs.promises.mkdir(dbDir, { recursive: true }));
+      await import("fs").then((fs) =>
+        fs.promises.mkdir(dbDir, { recursive: true })
+      );
     } else {
       dbPath = path.join(__dirname, DATABASE_URL);
     }
-    
+
     db = await open({
       filename: dbPath,
       driver: sqlite3.Database,
@@ -50,6 +53,10 @@ export async function initDatabase() {
         room_id TEXT NOT NULL,
         username TEXT NOT NULL,
         message TEXT NOT NULL,
+        message_type TEXT DEFAULT 'text',
+        file_url TEXT,
+        file_name TEXT,
+        file_size INTEGER,
         timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (room_id) REFERENCES rooms (id) ON DELETE CASCADE
       );
@@ -91,6 +98,25 @@ export async function initDatabase() {
       CREATE INDEX IF NOT EXISTS idx_room_users_room_id ON room_users (room_id);
       CREATE INDEX IF NOT EXISTS idx_room_users_socket_id ON room_users (socket_id);
     `);
+
+    // Add file support columns if they don't exist (migration)
+    try {
+      await db.exec(`
+        ALTER TABLE room_messages ADD COLUMN message_type TEXT DEFAULT 'text';
+      `);
+    } catch (error) {
+      // Column already exists, ignore error
+    }
+
+    try {
+      await db.exec(`
+        ALTER TABLE room_messages ADD COLUMN file_url TEXT;
+        ALTER TABLE room_messages ADD COLUMN file_name TEXT;
+        ALTER TABLE room_messages ADD COLUMN file_size INTEGER;
+      `);
+    } catch (error) {
+      // Columns already exist, ignore error
+    }
 
     console.log("✅ Database initialized successfully");
     return db;
@@ -196,9 +222,9 @@ export async function getRoomById(roomId) {
     createdAt: new Date(room.created_at),
     isNegotiationActive: room.is_negotiation_active,
     inviteToken: room.invite_token,
-    inviteLink: `${process.env.SERVER_URL || "https://chat-easy-integrate.onrender.com"}/invite/${
-      room.invite_token
-    }`,
+    inviteLink: `${
+      process.env.SERVER_URL || "https://chat-easy-integrate.onrender.com"
+    }/invite/${room.invite_token}`,
   };
 }
 
@@ -310,17 +336,30 @@ export async function getUserBySocketId(socketId) {
 }
 
 // Message operations
-export async function saveMessage(roomId, username, message) {
-  const result = await db.run(
-    "INSERT INTO room_messages (room_id, username, message) VALUES (?, ?, ?)",
-    [roomId, username, message]
-  );
+export async function saveMessage(roomId, username, message, messageType = 'text', fileData = null) {
+  let result;
+  
+  if (messageType === 'file' && fileData) {
+    result = await db.run(
+      "INSERT INTO room_messages (room_id, username, message, message_type, file_url, file_name, file_size) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      [roomId, username, message, messageType, fileData.url, fileData.fileName, fileData.size]
+    );
+  } else {
+    result = await db.run(
+      "INSERT INTO room_messages (room_id, username, message, message_type) VALUES (?, ?, ?, ?)",
+      [roomId, username, message, messageType]
+    );
+  }
 
   return {
     id: result.lastID,
     roomId,
     username,
     message,
+    messageType,
+    fileUrl: fileData?.url,
+    fileName: fileData?.fileName,
+    fileSize: fileData?.size,
     timestamp: new Date(),
   };
 }
@@ -335,6 +374,10 @@ export async function getRoomMessages(roomId, limit = 50) {
     id: msg.id,
     username: msg.username,
     message: msg.message,
+    messageType: msg.message_type || 'text',
+    fileUrl: msg.file_url,
+    fileName: msg.file_name,
+    fileSize: msg.file_size,
     timestamp: new Date(msg.timestamp),
   }));
 }

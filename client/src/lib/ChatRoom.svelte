@@ -17,6 +17,8 @@
   let messagesContainer;
   let typingUsers = [];
   let typingTimeout;
+  let fileInputRef;
+  let isUploadingFile = false;
 
   onMount(() => {
     if (socket) {
@@ -161,6 +163,59 @@
     newMessage = "";
   }
 
+  function handleFileSelect() {
+    fileInputRef.click();
+  }
+
+  async function handleFileUpload(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    // Check if it's a PDF file
+    if (file.type !== 'application/pdf') {
+      alert('Only PDF files are allowed!');
+      return;
+    }
+
+    // Check file size (10MB limit)
+    if (file.size > 10 * 1024 * 1024) {
+      alert('File size must be less than 10MB!');
+      return;
+    }
+
+    try {
+      isUploadingFile = true;
+      
+      const formData = new FormData();
+      formData.append('pdf', file);
+
+      const response = await fetch(`${config.serverUrl}/api/upload/pdf`, {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        throw new Error('Upload failed');
+      }
+
+      const fileInfo = await response.json();
+
+      // Send file message via socket
+      socket.emit('send-file', {
+        fileInfo,
+        message: newMessage.trim() || `Shared a PDF: ${file.name}`,
+      });
+
+      newMessage = "";
+      event.target.value = ""; // Reset file input
+    } catch (error) {
+      console.error('Error uploading file:', error);
+      alert('Failed to upload file. Please try again.');
+    } finally {
+      isUploadingFile = false;
+    }
+  }
+
   async function shareLocation() {
     if (!socket) return;
 
@@ -260,6 +315,21 @@
         }, 1000);
       }
     }
+  }
+
+  function formatFileSize(bytes) {
+    if (!bytes) return 'Unknown size';
+    
+    const units = ['B', 'KB', 'MB', 'GB'];
+    let size = bytes;
+    let unitIndex = 0;
+    
+    while (size >= 1024 && unitIndex < units.length - 1) {
+      size /= 1024;
+      unitIndex++;
+    }
+    
+    return `${size.toFixed(1)} ${units[unitIndex]}`;
   }
 
   function startNegotiation() {
@@ -432,6 +502,41 @@
             <span class="loading-spinner">🔄</span>
             {message.message}
           </div>
+        {:else if message.type === "file" || message.messageType === "file"}
+          <div class="message-header">
+            <span class="username">{message.username}</span>
+            <span class="timestamp">{formatTime(message.timestamp)}</span>
+          </div>
+          <div class="file-message">
+            <div class="file-content">
+              <div class="file-icon">📄</div>
+              <div class="file-details">
+                <div class="file-name">{message.fileName || 'PDF Document'}</div>
+                <div class="file-size">{formatFileSize(message.fileSize)}</div>
+                {#if message.message && message.message !== `Shared a PDF: ${message.fileName}`}
+                  <div class="file-message-text">{message.message}</div>
+                {/if}
+              </div>
+            </div>
+            <div class="file-actions">
+              <a 
+                href="{config.serverUrl}{message.fileUrl}" 
+                target="_blank" 
+                rel="noopener noreferrer"
+                class="file-download-btn"
+              >
+                📥 Download
+              </a>
+              <a 
+                href="{config.serverUrl}{message.fileUrl}" 
+                target="_blank" 
+                rel="noopener noreferrer"
+                class="file-view-btn"
+              >
+                👁️ View
+              </a>
+            </div>
+          </div>
         {:else}
           <div class="system-content">
             <span class="system-icon">
@@ -468,6 +573,23 @@
   <div class="message-input">
     <div class="input-container">
       <div class="input-actions">
+        <button
+          class="file-btn"
+          onclick={handleFileSelect}
+          title="Share PDF file"
+          disabled={isUploadingFile}
+        >
+          {#if isUploadingFile}
+            <svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" {...$$props}>
+              <path fill="currentColor" d="M2 12c0 5.523 4.477 10 10 10s10-4.477 10-10S17.523 2 12 2S2 6.477 2 12m2 0c0-4.411 3.589-8 8-8s8 3.589 8 8s-3.589 8-8 8s-8-3.589-8-8"/>
+              <animateTransform attributeName="transform" dur="1s" repeatCount="indefinite" type="rotate" values="0 12 12;360 12 12"/>
+            </svg>
+          {:else}
+            <svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" {...$$props}>
+              <path fill="currentColor" d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM6 20V4h7v5h5v11zm2-6h8v2H8zm0 3h5v2H8zm0-6h5v2H8z"/>
+            </svg>
+          {/if}
+        </button>
         <button
           class="location-btn"
           onclick={shareLocation}
@@ -510,6 +632,15 @@
         >
       </button>
     </div>
+    
+    <!-- Hidden file input -->
+    <input 
+      type="file" 
+      bind:this={fileInputRef}
+      accept=".pdf,application/pdf"
+      onchange={handleFileUpload}
+      style="display: none;"
+    />
   </div>
 </div>
 
@@ -1041,5 +1172,105 @@
     .message-input {
       padding: 10px 15px;
     }
+  }
+
+  /* File upload and message styles */
+  .file-btn {
+    background: #8b5cf6;
+    border: none;
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    cursor: pointer;
+    color: white;
+    font-size: 16px;
+    transition: all 0.3s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .file-btn:hover:not(:disabled) {
+    background: #7c3aed;
+    transform: scale(1.1);
+  }
+
+  .file-btn:disabled {
+    opacity: 0.7;
+    cursor: not-allowed;
+    transform: none;
+  }
+
+  .file-message {
+    background: #f8f9fa;
+    border: 1px solid #e1e5e9;
+    border-radius: 12px;
+    padding: 15px;
+    margin-top: 5px;
+  }
+
+  .file-content {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 10px;
+  }
+
+  .file-icon {
+    font-size: 24px;
+    color: #dc2626;
+  }
+
+  .file-details {
+    flex: 1;
+  }
+
+  .file-name {
+    font-weight: 600;
+    color: #333;
+    margin-bottom: 4px;
+  }
+
+  .file-size {
+    font-size: 12px;
+    color: #666;
+    margin-bottom: 4px;
+  }
+
+  .file-message-text {
+    font-size: 14px;
+    color: #444;
+    font-style: italic;
+  }
+
+  .file-actions {
+    display: flex;
+    gap: 8px;
+  }
+
+  .file-download-btn,
+  .file-view-btn {
+    background: #4f46e5;
+    color: white;
+    text-decoration: none;
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 500;
+    transition: all 0.3s;
+  }
+
+  .file-download-btn:hover,
+  .file-view-btn:hover {
+    background: #4338ca;
+    transform: translateY(-1px);
+  }
+
+  .file-view-btn {
+    background: #059669;
+  }
+
+  .file-view-btn:hover {
+    background: #047857;
   }
 </style>
