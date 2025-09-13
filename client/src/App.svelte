@@ -1,10 +1,11 @@
 <script>
   import { onMount } from "svelte";
   import MessagingModule from "./lib/MessagingModule.svelte";
+  import { getServerUrl } from "./lib/config.js";
 
   let showModule = false;
   let config = {
-    serverUrl: "http://localhost:3000",
+    serverUrl: getServerUrl(),
     username: "User" + Math.floor(Math.random() * 1000),
     theme: "modern",
   };
@@ -113,8 +114,7 @@
       <div class="hero-text">
         <h1>💬 Connect & Negotiate</h1>
         <p class="hero-subtitle">
-          The modern messaging platform for group discussions and collaborative
-          decision making
+          Streamlining your negotiation and group decision making with ease (plan to automate the entire thing to work with any messaging app)
         </p>
 
         <div class="hero-stats">
@@ -134,7 +134,7 @@
 
         <div class="hero-actions">
           <button class="primary-btn" onclick={toggleModule}>
-            🚀 Start Messaging
+            Start Messaging
           </button>
 
           <div class="quick-join">

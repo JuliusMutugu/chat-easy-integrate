@@ -4,9 +4,10 @@
   import ChatRoom from "./ChatRoom.svelte";
   import RoomList from "./RoomList.svelte";
   import CreateRoom from "./CreateRoom.svelte";
+  import { getServerUrl } from "./config.js";
 
   export let config = {
-    serverUrl: "http://localhost:3000",
+    serverUrl: getServerUrl(),
     username: "User",
     theme: "modern",
   };

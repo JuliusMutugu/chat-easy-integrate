@@ -1,0 +1,24 @@
+services:
+  - type: web
+    name: simple-messaging-platform
+    env: node
+    plan: free
+    region: oregon
+    buildCommand: npm run install-all && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        value: /opt/render/project/src/data/messaging.db
+      - key: SERVER_URL
+        sync: false
+      - key: CLIENT_URL
+        sync: false
+      - key: CORS_ORIGIN
+        sync: false
+    disk:
+      name: data
+      mountPath: /opt/render/project/src/data
+      sizeGB: 1

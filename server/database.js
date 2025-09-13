@@ -6,15 +6,31 @@ import { fileURLToPath } from "url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// Database configuration
+const DATABASE_URL = process.env.DATABASE_URL || path.join(__dirname, "messaging.db");
+
 // Database connection
 let db = null;
 
 export async function initDatabase() {
   try {
+    // Handle both relative and absolute paths
+    let dbPath;
+    if (path.isAbsolute(DATABASE_URL)) {
+      dbPath = DATABASE_URL;
+      // Ensure the directory exists for absolute paths (like Render)
+      const dbDir = path.dirname(dbPath);
+      await import('fs').then(fs => fs.promises.mkdir(dbDir, { recursive: true }));
+    } else {
+      dbPath = path.join(__dirname, DATABASE_URL);
+    }
+    
     db = await open({
-      filename: path.join(__dirname, "messaging.db"),
+      filename: dbPath,
       driver: sqlite3.Database,
     });
+
+    console.log(`📅 Database initialized at: ${dbPath}`);
 
     // Create tables
     await db.exec(`

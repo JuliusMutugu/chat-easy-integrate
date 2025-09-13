@@ -194,7 +194,7 @@ Looking forward to chatting with you! 😊`;
                 onclick={() => showInvite(room)}
                 title="Invite others"
               >
-                📤
+                Invite
               </button>
             </div>
           </div>
@@ -232,10 +232,28 @@ Looking forward to chatting with you! 😊`;
 
   <!-- Invitation Modal -->
   {#if showInviteModal && selectedRoom}
-    <div class="modal-overlay" onclick={closeInviteModal}>
-      <div class="invite-modal" onclick={(e) => e.stopPropagation()}>
+    <div 
+      class="modal-overlay" 
+      role="button"
+      tabindex="0"
+      onclick={closeInviteModal}
+      onkeydown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          closeInviteModal();
+        }
+      }}
+    >
+      <div 
+        class="invite-modal" 
+        role="dialog"
+        tabindex="-1"
+        aria-labelledby="invite-modal-title"
+        onclick={(e) => e.stopPropagation()}
+        onkeydown={(e) => e.stopPropagation()}
+      >
         <div class="modal-header">
-          <h3>📤 Invite to "{selectedRoom.name}"</h3>
+          <h3 id="invite-modal-title">📤 Invite to "{selectedRoom.name}"</h3>
           <button class="close-modal-btn" onclick={closeInviteModal}>✕</button>
         </div>
 
@@ -323,7 +341,7 @@ Looking forward to chatting with you! 😊`;
                     `https://twitter.com/intent/tweet?text=${encodeURIComponent(`🎯 Join me for a discussion in "${selectedRoom.name}"!\n💬 Room Code: ${selectedRoom.code}`)}&url=${encodeURIComponent(inviteLink)}`
                   )}
               >
-                🐦 Twitter
+                🐦 X
               </button>
               <button
                 class="share-btn messenger"

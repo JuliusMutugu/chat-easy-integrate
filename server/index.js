@@ -19,16 +19,24 @@ import {
   getRoomMessages,
 } from "./database.js";
 
+// Environment configuration
+const PORT = process.env.PORT || 3000;
+const NODE_ENV = process.env.NODE_ENV || 'development';
+const CLIENT_URL = process.env.CLIENT_URL || `http://localhost:${PORT}`;
+const CORS_ORIGIN = process.env.CORS_ORIGIN || "*";
+
 const app = express();
 const server = createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: "*",
+    origin: CORS_ORIGIN,
     methods: ["GET", "POST"],
   },
 });
 
-app.use(cors());
+app.use(cors({
+  origin: CORS_ORIGIN
+}));
 app.use(express.json());
 
 // Initialize database
@@ -394,8 +402,6 @@ io.on("connection", (socket) => {
     }
   });
 });
-
-const PORT = process.env.PORT || 3000;
 
 // Handle port in use error
 server
