@@ -196,7 +196,7 @@ export async function getRoomById(roomId) {
     createdAt: new Date(room.created_at),
     isNegotiationActive: room.is_negotiation_active,
     inviteToken: room.invite_token,
-    inviteLink: `${process.env.SERVER_URL || "http://localhost:3000"}/invite/${
+    inviteLink: `${process.env.SERVER_URL || "https://chat-easy-integrate.onrender.com"}/invite/${
       room.invite_token
     }`,
   };
@@ -236,7 +236,7 @@ export async function getAllRooms() {
         isNegotiationActive: room.is_negotiation_active,
         inviteToken: room.invite_token,
         inviteLink: `${
-          process.env.SERVER_URL || "http://localhost:3000"
+          process.env.SERVER_URL || "https://chat-easy-integrate.onrender.com"
         }/invite/${room.invite_token}`,
       };
     })

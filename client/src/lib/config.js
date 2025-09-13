@@ -13,7 +13,7 @@ export const getServerUrl = () => {
   }
   
   // Fallback for SSR or Node.js environment
-  return process.env.SERVER_URL || 'http://localhost:3000';
+  return process.env.SERVER_URL || 'https://chat-easy-integrate.onrender.com';
 };
 
 export const config = {

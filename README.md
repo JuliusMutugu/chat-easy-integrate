@@ -37,13 +37,24 @@ A lightweight, embeddable messaging module for group negotiations and temporary 
 
 ## 📦 Integration
 
+## 📦 Integration
+
+### 🚀 Quick Start (5 minutes)
+Want to add chat to your existing app? Check out our **[Quick Start Guide](./QUICK_START.md)** for copy-paste code examples.
+
+### 🔌 Full Integration Guide
+For comprehensive integration options including React, Vue, WordPress, and mobile apps, see our **[Integration Guide](./INTEGRATION_GUIDE.md)**.
+
+### 📡 API Documentation
+For backend integration and custom implementations, check the **[API Documentation](./API_DOCS.md)**.
+
 ### Basic Usage
 
 ```javascript
 import MessagingModule from "./lib/MessagingModule.svelte";
 
 let config = {
-  serverUrl: "http://your-server.com",
+  serverUrl: "https://chat-easy-integrate.onrender.com",
   username: "user123",
   theme: "modern",
 };
@@ -65,7 +76,20 @@ function handleClose() {
 | `username`  | string | Required                | User display name  |
 | `theme`     | string | `modern`                | UI theme           |
 
-## 🏗️ Architecture
+## � Integration Use Cases
+
+This messaging platform can enhance any application:
+
+- **🛒 E-commerce**: Customer support chat, order discussions
+- **📚 Education**: Study groups, student-teacher communication  
+- **💼 Business**: Team collaboration, client meetings
+- **🏥 Healthcare**: Patient-doctor consultations, team coordination
+- **🎮 Gaming**: Player communication, guild chat
+- **🏠 Real Estate**: Agent-client discussions, property inquiries
+- **💡 SaaS Platforms**: User support, feature feedback
+- **🎨 Creative Agencies**: Client collaboration, project discussions
+
+## �🏗️ Architecture
 
 ```
 ├── server/              # Node.js backend

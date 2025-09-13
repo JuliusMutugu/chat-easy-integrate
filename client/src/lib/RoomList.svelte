@@ -20,10 +20,10 @@
 
   function showInvite(room) {
     selectedRoom = room;
-    // Use the persistent invite link from the server
+    // Use the persistent invite link from the server or fallback to production URL
     inviteLink =
       room.inviteLink ||
-      `${window.location.origin}?room=${room.id}&invite=true`;
+      `${config.serverUrl || "https://chat-easy-integrate.onrender.com"}?room=${room.id}&invite=true`;
     showInviteModal = true;
   }
 
@@ -109,34 +109,16 @@
   </div>
 </div>`;
 
-    // Plain text fallback for email clients that don't support HTML
-    const plainBody = `🎯 You're invited to join "${selectedRoom.name}"!
-
-📋 Quick Join Options:
-• Room Code: ${selectedRoom.code}
-• Direct Link: ${inviteLink}
-
-📝 Description: ${selectedRoom.description}
-
-💡 How to join:
-1. Visit the messaging platform
-2. Enter room code: ${selectedRoom.code}
-3. Or click the direct link above
-
-Looking forward to chatting with you! 😊`;
-
-    // Try to copy HTML to clipboard first
+    // Copy HTML to clipboard first
     copyHTMLInvitation(htmlBody);
 
-    // Open mailto with plain text fallback
-    const mailtoLink = `mailto:${inviteEmail}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(plainBody)}`;
+    // Open mailto with HTML body (most modern email clients support this)
+    const mailtoLink = `mailto:${inviteEmail}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(htmlBody)}`;
 
     window.open(mailtoLink);
     inviteEmail = "";
     showInviteModal = false;
-    showToast(
-      "HTML invitation copied to clipboard! Email client opened with fallback text."
-    );
+    showToast("HTML invitation copied to clipboard and email opened!");
   }
 
   async function copyHTMLInvitation(htmlContent) {
@@ -157,33 +139,6 @@ Looking forward to chatting with you! 😊`;
     } catch (err) {
       console.warn("Could not copy HTML to clipboard:", err);
     }
-  }
-
-  function copyRichInvitation() {
-    const htmlInvitation = generateHTMLInvitation();
-    copyHTMLInvitation(htmlInvitation);
-    showToast("Rich HTML invitation copied to clipboard!");
-  }
-
-  function generateHTMLInvitation() {
-    return `
-<div style="font-family: Arial, sans-serif; max-width: 500px; background: #f8f9fa; padding: 20px; border-radius: 10px; border: 2px solid #667eea;">
-  <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 8px; text-align: center; margin-bottom: 15px;">
-    <h2 style="margin: 0; font-size: 20px;">🎯 Join our chat!</h2>
-    <p style="margin: 5px 0 0 0;">"${selectedRoom.name}"</p>
-  </div>
-  
-  <div style="background: white; padding: 20px; border-radius: 8px;">
-    <p style="margin: 0 0 15px 0;"><strong>🔢 Room Code:</strong> <span style="font-family: 'Courier New', monospace; background: #e3f2fd; padding: 5px 10px; border-radius: 4px; font-size: 18px; font-weight: bold;">${selectedRoom.code}</span></p>
-    
-    <p style="margin: 0 0 15px 0;"><strong>🔗 Direct Link:</strong><br>
-    <a href="${inviteLink}" style="color: #2e7d32; font-weight: bold;">${inviteLink}</a></p>
-    
-    <p style="margin: 0 0 15px 0;"><strong>📝 Description:</strong><br>${selectedRoom.description}</p>
-    
-    <p style="margin: 0; text-align: center; color: #666; font-size: 14px;">Click the link or use the room code to join! 😊</p>
-  </div>
-</div>`;
   }
 
   function closeInviteModal() {
@@ -404,19 +359,6 @@ Looking forward to chatting with you! 😊`;
                 disabled={!inviteEmail.trim()}
               >
                 📧 Send
-              </button>
-            </div>
-          </div>
-
-          <div class="invite-section">
-            <h4>✨ Rich HTML Invitation</h4>
-            <p class="invite-description">Copy a beautifully formatted invitation with clickable links</p>
-            <div class="html-invite-container">
-              <button
-                class="rich-invite-btn"
-                onclick={copyRichInvitation}
-              >
-                📋 Copy Rich Invitation
               </button>
             </div>
           </div>
@@ -991,29 +933,6 @@ Looking forward to chatting with you! 😊`;
   .generate-btn:hover {
     background: #7c3aed;
     transform: translateY(-1px);
-  }
-
-  .html-invite-container {
-    text-align: center;
-    margin-top: 10px;
-  }
-
-  .rich-invite-btn {
-    background: linear-gradient(135deg, #10b981 0%, #059669 100%);
-    color: white;
-    border: none;
-    padding: 12px 24px;
-    border-radius: 8px;
-    cursor: pointer;
-    font-size: 14px;
-    font-weight: 600;
-    transition: all 0.3s;
-    box-shadow: 0 2px 10px rgba(16, 185, 129, 0.3);
-  }
-
-  .rich-invite-btn:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 5px 20px rgba(16, 185, 129, 0.4);
   }
 
   .invite-description {
