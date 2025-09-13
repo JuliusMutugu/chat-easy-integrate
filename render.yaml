@@ -13,11 +13,11 @@ services:
       - key: DATABASE_URL
         value: /opt/render/project/src/data/messaging.db
       - key: SERVER_URL
-        sync: false
+        value: https://chat-easy-integrate.onrender.com
       - key: CLIENT_URL
-        sync: false
+        value: https://chat-easy-integrate.onrender.com
       - key: CORS_ORIGIN
-        sync: false
+        value: https://chat-easy-integrate.onrender.com
     disk:
       name: data
       mountPath: /opt/render/project/src/data

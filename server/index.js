@@ -56,7 +56,8 @@ app.get("/api/health", (req, res) => {
 app.post("/api/rooms", async (req, res) => {
   try {
     const { name, description, maxUsers = 10 } = req.body;
-    const serverUrl = `${req.protocol}://${req.get("host")}`;
+    // Use environment variable in production, fallback to request URL
+    const serverUrl = process.env.SERVER_URL || `${req.protocol}://${req.get("host")}`;
 
     const room = await createRoom({ name, description, maxUsers }, serverUrl);
 
@@ -168,7 +169,8 @@ app.get("/api/rooms/invite/:inviteToken", async (req, res) => {
 app.post("/api/rooms/:roomId/invite", async (req, res) => {
   try {
     const { roomId } = req.params;
-    const serverUrl = `${req.protocol}://${req.get("host")}`;
+    // Use environment variable in production, fallback to request URL
+    const serverUrl = process.env.SERVER_URL || `${req.protocol}://${req.get("host")}`;
 
     const room = await getRoomById(roomId);
     if (!room) {

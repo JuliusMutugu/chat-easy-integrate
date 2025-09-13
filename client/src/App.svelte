@@ -267,7 +267,7 @@
             <input
               id="serverUrl"
               bind:value={config.serverUrl}
-              placeholder="http://localhost:3000"
+              placeholder="https://chat-easy-integrate.onrender.com"
             />
           </div>
         </div>
