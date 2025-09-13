@@ -1,7 +1,7 @@
-import sqlite3 from 'sqlite3';
-import { open } from 'sqlite';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import sqlite3 from "sqlite3";
+import { open } from "sqlite";
+import path from "path";
+import { fileURLToPath } from "url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -12,8 +12,8 @@ let db = null;
 export async function initDatabase() {
   try {
     db = await open({
-      filename: path.join(__dirname, 'messaging.db'),
-      driver: sqlite3.Database
+      filename: path.join(__dirname, "messaging.db"),
+      driver: sqlite3.Database,
     });
 
     // Create tables
@@ -76,10 +76,10 @@ export async function initDatabase() {
       CREATE INDEX IF NOT EXISTS idx_room_users_socket_id ON room_users (socket_id);
     `);
 
-    console.log('✅ Database initialized successfully');
+    console.log("✅ Database initialized successfully");
     return db;
   } catch (error) {
-    console.error('❌ Database initialization failed:', error);
+    console.error("❌ Database initialization failed:", error);
     throw error;
   }
 }
@@ -88,18 +88,20 @@ export async function initDatabase() {
 export async function generateRoomCode() {
   let code;
   let isUnique = false;
-  
+
   while (!isUnique) {
     // Generate 6-digit numeric code
     code = Math.floor(100000 + Math.random() * 900000);
-    
+
     // Check if code already exists
-    const existing = await db.get('SELECT code FROM rooms WHERE code = ?', [code]);
+    const existing = await db.get("SELECT code FROM rooms WHERE code = ?", [
+      code,
+    ]);
     if (!existing) {
       isUnique = true;
     }
   }
-  
+
   return code;
 }
 
@@ -107,34 +109,41 @@ export async function generateRoomCode() {
 export async function generateInviteToken() {
   let token;
   let isUnique = false;
-  
+
   while (!isUnique) {
     // Generate 32-character token
-    const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-    token = '';
+    const chars =
+      "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    token = "";
     for (let i = 0; i < 32; i++) {
       token += chars.charAt(Math.floor(Math.random() * chars.length));
     }
-    
+
     // Check if token already exists
-    const existing = await db.get('SELECT invite_token FROM rooms WHERE invite_token = ?', [token]);
+    const existing = await db.get(
+      "SELECT invite_token FROM rooms WHERE invite_token = ?",
+      [token]
+    );
     if (!existing) {
       isUnique = true;
     }
   }
-  
+
   return token;
 }
 
 // Room operations
-export async function createRoom({ name, description, maxUsers = 10 }, serverUrl) {
+export async function createRoom(
+  { name, description, maxUsers = 10 },
+  serverUrl
+) {
   const roomId = generateUUID();
   const code = await generateRoomCode();
   const inviteToken = await generateInviteToken();
   const inviteLink = `${serverUrl}/invite/${inviteToken}`;
 
   const result = await db.run(
-    'INSERT INTO rooms (id, code, invite_token, name, description, max_users) VALUES (?, ?, ?, ?, ?, ?)',
+    "INSERT INTO rooms (id, code, invite_token, name, description, max_users) VALUES (?, ?, ?, ?, ?, ?)",
     [roomId, code, inviteToken, name, description, maxUsers]
   );
 
@@ -148,16 +157,19 @@ export async function createRoom({ name, description, maxUsers = 10 }, serverUrl
     inviteLink,
     userCount: 0,
     createdAt: new Date(),
-    isNegotiationActive: false
+    isNegotiationActive: false,
   };
 }
 
 export async function getRoomById(roomId) {
-  const room = await db.get('SELECT * FROM rooms WHERE id = ?', [roomId]);
+  const room = await db.get("SELECT * FROM rooms WHERE id = ?", [roomId]);
   if (!room) return null;
 
-  const userCount = await db.get('SELECT COUNT(*) as count FROM room_users WHERE room_id = ?', [roomId]);
-  
+  const userCount = await db.get(
+    "SELECT COUNT(*) as count FROM room_users WHERE room_id = ?",
+    [roomId]
+  );
+
   return {
     id: room.id,
     code: room.code,
@@ -168,28 +180,35 @@ export async function getRoomById(roomId) {
     createdAt: new Date(room.created_at),
     isNegotiationActive: room.is_negotiation_active,
     inviteToken: room.invite_token,
-    inviteLink: `${process.env.SERVER_URL || 'http://localhost:3000'}/invite/${room.invite_token}`
+    inviteLink: `${process.env.SERVER_URL || "http://localhost:3000"}/invite/${
+      room.invite_token
+    }`,
   };
 }
 
 export async function getRoomByCode(code) {
-  const room = await db.get('SELECT * FROM rooms WHERE code = ?', [code]);
+  const room = await db.get("SELECT * FROM rooms WHERE code = ?", [code]);
   if (!room) return null;
   return getRoomById(room.id);
 }
 
 export async function getRoomByInviteToken(inviteToken) {
-  const room = await db.get('SELECT * FROM rooms WHERE invite_token = ?', [inviteToken]);
+  const room = await db.get("SELECT * FROM rooms WHERE invite_token = ?", [
+    inviteToken,
+  ]);
   if (!room) return null;
   return getRoomById(room.id);
 }
 
 export async function getAllRooms() {
-  const rooms = await db.all('SELECT * FROM rooms ORDER BY created_at DESC');
-  
+  const rooms = await db.all("SELECT * FROM rooms ORDER BY created_at DESC");
+
   const roomsWithCounts = await Promise.all(
     rooms.map(async (room) => {
-      const userCount = await db.get('SELECT COUNT(*) as count FROM room_users WHERE room_id = ?', [room.id]);
+      const userCount = await db.get(
+        "SELECT COUNT(*) as count FROM room_users WHERE room_id = ?",
+        [room.id]
+      );
       return {
         id: room.id,
         code: room.code,
@@ -200,7 +219,9 @@ export async function getAllRooms() {
         createdAt: new Date(room.created_at),
         isNegotiationActive: room.is_negotiation_active,
         inviteToken: room.invite_token,
-        inviteLink: `${process.env.SERVER_URL || 'http://localhost:3000'}/invite/${room.invite_token}`
+        inviteLink: `${
+          process.env.SERVER_URL || "http://localhost:3000"
+        }/invite/${room.invite_token}`,
       };
     })
   );
@@ -211,93 +232,102 @@ export async function getAllRooms() {
 export async function updateRoomInviteToken(roomId, serverUrl) {
   const newInviteToken = await generateInviteToken();
   const newInviteLink = `${serverUrl}/invite/${newInviteToken}`;
-  
-  await db.run(
-    'UPDATE rooms SET invite_token = ? WHERE id = ?',
-    [newInviteToken, roomId]
-  );
-  
+
+  await db.run("UPDATE rooms SET invite_token = ? WHERE id = ?", [
+    newInviteToken,
+    roomId,
+  ]);
+
   return {
     inviteToken: newInviteToken,
-    inviteLink: newInviteLink
+    inviteLink: newInviteLink,
   };
 }
 
 export async function deleteRoom(roomId) {
-  await db.run('DELETE FROM rooms WHERE id = ?', [roomId]);
+  await db.run("DELETE FROM rooms WHERE id = ?", [roomId]);
 }
 
 // User operations
 export async function addUserToRoom(roomId, socketId, username) {
   await db.run(
-    'INSERT INTO room_users (room_id, socket_id, username) VALUES (?, ?, ?)',
+    "INSERT INTO room_users (room_id, socket_id, username) VALUES (?, ?, ?)",
     [roomId, socketId, username]
   );
 }
 
 export async function removeUserFromRoom(socketId) {
-  const user = await db.get('SELECT * FROM room_users WHERE socket_id = ?', [socketId]);
+  const user = await db.get("SELECT * FROM room_users WHERE socket_id = ?", [
+    socketId,
+  ]);
   if (user) {
-    await db.run('DELETE FROM room_users WHERE socket_id = ?', [socketId]);
-    
+    await db.run("DELETE FROM room_users WHERE socket_id = ?", [socketId]);
+
     // Check if room is empty
-    const remainingUsers = await db.get('SELECT COUNT(*) as count FROM room_users WHERE room_id = ?', [user.room_id]);
+    const remainingUsers = await db.get(
+      "SELECT COUNT(*) as count FROM room_users WHERE room_id = ?",
+      [user.room_id]
+    );
     if (remainingUsers.count === 0) {
       // Room is empty, delete it
       await deleteRoom(user.room_id);
       console.log(`🧹 Cleaned up empty room: ${user.room_id}`);
     }
-    
+
     return user;
   }
   return null;
 }
 
 export async function getRoomUsers(roomId) {
-  const users = await db.all('SELECT * FROM room_users WHERE room_id = ?', [roomId]);
+  const users = await db.all("SELECT * FROM room_users WHERE room_id = ?", [
+    roomId,
+  ]);
   return users;
 }
 
 export async function getUserBySocketId(socketId) {
-  const user = await db.get('SELECT * FROM room_users WHERE socket_id = ?', [socketId]);
+  const user = await db.get("SELECT * FROM room_users WHERE socket_id = ?", [
+    socketId,
+  ]);
   return user;
 }
 
 // Message operations
 export async function saveMessage(roomId, username, message) {
   const result = await db.run(
-    'INSERT INTO room_messages (room_id, username, message) VALUES (?, ?, ?)',
+    "INSERT INTO room_messages (room_id, username, message) VALUES (?, ?, ?)",
     [roomId, username, message]
   );
-  
+
   return {
     id: result.lastID,
     roomId,
     username,
     message,
-    timestamp: new Date()
+    timestamp: new Date(),
   };
 }
 
 export async function getRoomMessages(roomId, limit = 50) {
   const messages = await db.all(
-    'SELECT * FROM room_messages WHERE room_id = ? ORDER BY timestamp DESC LIMIT ?',
+    "SELECT * FROM room_messages WHERE room_id = ? ORDER BY timestamp DESC LIMIT ?",
     [roomId, limit]
   );
-  
-  return messages.reverse().map(msg => ({
+
+  return messages.reverse().map((msg) => ({
     id: msg.id,
     username: msg.username,
     message: msg.message,
-    timestamp: new Date(msg.timestamp)
+    timestamp: new Date(msg.timestamp),
   }));
 }
 
 // Utility function for UUID generation
 function generateUUID() {
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
-    const r = Math.random() * 16 | 0;
-    const v = c == 'x' ? r : (r & 0x3 | 0x8);
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, function (c) {
+    const r = (Math.random() * 16) | 0;
+    const v = c == "x" ? r : (r & 0x3) | 0x8;
     return v.toString(16);
   });
 }

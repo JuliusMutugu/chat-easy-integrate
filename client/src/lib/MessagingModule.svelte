@@ -1,20 +1,20 @@
 <script>
-  import { onMount, onDestroy } from 'svelte';
-  import { io } from 'socket.io-client';
-  import ChatRoom from './ChatRoom.svelte';
-  import RoomList from './RoomList.svelte';
-  import CreateRoom from './CreateRoom.svelte';
+  import { onMount, onDestroy } from "svelte";
+  import { io } from "socket.io-client";
+  import ChatRoom from "./ChatRoom.svelte";
+  import RoomList from "./RoomList.svelte";
+  import CreateRoom from "./CreateRoom.svelte";
 
   export let config = {
-    serverUrl: 'http://localhost:3000',
-    username: 'User',
-    theme: 'modern'
+    serverUrl: "http://localhost:3000",
+    username: "User",
+    theme: "modern",
   };
   export let inviteRoom = null;
   export let onClose = () => {};
 
   let socket = null;
-  let currentView = 'rooms'; // 'rooms', 'create', 'chat'
+  let currentView = "rooms"; // 'rooms', 'create', 'chat'
   let currentRoom = null;
   let rooms = [];
   let isConnected = false;
@@ -22,10 +22,10 @@
 
   onMount(() => {
     connectToServer();
-    
+
     // If there's an invite room, show it prominently
     if (inviteRoom) {
-      currentView = 'rooms';
+      currentView = "rooms";
     }
   });
 
@@ -37,23 +37,23 @@
 
   function connectToServer() {
     socket = io(config.serverUrl);
-    
-    socket.on('connect', () => {
+
+    socket.on("connect", () => {
       isConnected = true;
       error = null;
       loadRooms();
     });
 
-    socket.on('disconnect', () => {
+    socket.on("disconnect", () => {
       isConnected = false;
     });
 
-    socket.on('connect_error', (err) => {
-      error = 'Failed to connect to server';
+    socket.on("connect_error", (err) => {
+      error = "Failed to connect to server";
       isConnected = false;
     });
 
-    socket.on('error', (data) => {
+    socket.on("error", (data) => {
       error = data.message;
     });
   }
@@ -63,42 +63,42 @@
       const response = await fetch(`${config.serverUrl}/api/rooms`);
       rooms = await response.json();
     } catch (err) {
-      error = 'Failed to load rooms';
+      error = "Failed to load rooms";
     }
   }
 
   function handleCreateRoom() {
-    currentView = 'create';
+    currentView = "create";
   }
 
   function handleJoinRoom(room) {
     currentRoom = room;
-    currentView = 'chat';
+    currentView = "chat";
   }
 
   function handleRoomCreated() {
-    currentView = 'rooms';
+    currentView = "rooms";
     loadRooms();
   }
 
   function handleLeaveRoom() {
     currentRoom = null;
-    currentView = 'rooms';
+    currentView = "rooms";
     loadRooms();
   }
 
   function handleBackToRooms() {
-    currentView = 'rooms';
+    currentView = "rooms";
   }
 </script>
 
-<div class="messaging-overlay" class:theme-modern={config.theme === 'modern'}>
+<div class="messaging-overlay" class:theme-modern={config.theme === "modern"}>
   <div class="messaging-container">
     <div class="messaging-header">
       <h2>💬 Messaging Platform</h2>
       <div class="header-info">
         <span class="connection-status" class:connected={isConnected}>
-          {isConnected ? '🟢 Connected' : '🔴 Disconnected'}
+          {isConnected ? "🟢 Connected" : "🔴 Disconnected"}
         </span>
         <button class="close-btn" onclick={onClose}>✕</button>
       </div>
@@ -107,28 +107,28 @@
     {#if error}
       <div class="error-message">
         ⚠️ {error}
-        <button onclick={() => error = null}>×</button>
+        <button onclick={() => (error = null)}>×</button>
       </div>
     {/if}
 
     <div class="messaging-content">
-      {#if currentView === 'rooms'}
-        <RoomList 
-          {rooms} 
+      {#if currentView === "rooms"}
+        <RoomList
+          {rooms}
           {config}
           {inviteRoom}
           onCreateRoom={handleCreateRoom}
           onJoinRoom={handleJoinRoom}
           onRefresh={loadRooms}
         />
-      {:else if currentView === 'create'}
-        <CreateRoom 
+      {:else if currentView === "create"}
+        <CreateRoom
           {config}
           onRoomCreated={handleRoomCreated}
           onBack={handleBackToRooms}
         />
-      {:else if currentView === 'chat' && currentRoom}
-        <ChatRoom 
+      {:else if currentView === "chat" && currentRoom}
+        <ChatRoom
           {socket}
           {config}
           room={currentRoom}
@@ -249,16 +249,16 @@
     .messaging-overlay {
       padding: 10px;
     }
-    
+
     .messaging-container {
       height: 95vh;
       max-height: none;
     }
-    
+
     .messaging-header {
       padding: 15px;
     }
-    
+
     .messaging-header h2 {
       font-size: 1.3em;
     }

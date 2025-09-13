@@ -1,30 +1,30 @@
 <script>
-  import { onMount } from 'svelte';
-  import MessagingModule from './lib/MessagingModule.svelte';
-  
+  import { onMount } from "svelte";
+  import MessagingModule from "./lib/MessagingModule.svelte";
+
   let showModule = false;
   let config = {
-    serverUrl: 'http://localhost:3000',
-    username: 'User' + Math.floor(Math.random() * 1000),
-    theme: 'modern'
+    serverUrl: "http://localhost:3000",
+    username: "User" + Math.floor(Math.random() * 1000),
+    theme: "modern",
   };
   let inviteRoom = null;
-  let quickJoinCode = '';
+  let quickJoinCode = "";
 
   onMount(() => {
     // Check for invitation link in URL
     const urlParams = new URLSearchParams(window.location.search);
-    const roomId = urlParams.get('room');
-    const isInvite = urlParams.get('invite');
-    const inviteToken = urlParams.get('invite');
-    const errorParam = urlParams.get('error');
-    
-    if (errorParam === 'invalid-invite') {
-      alert('Invalid or expired invitation link.');
+    const roomId = urlParams.get("room");
+    const isInvite = urlParams.get("invite");
+    const inviteToken = urlParams.get("invite");
+    const errorParam = urlParams.get("error");
+
+    if (errorParam === "invalid-invite") {
+      alert("Invalid or expired invitation link.");
       return;
     }
-    
-    if (inviteToken && inviteToken !== 'true') {
+
+    if (inviteToken && inviteToken !== "true") {
       // New invite token system
       handleInviteToken(inviteToken);
     } else if (roomId && isInvite) {
@@ -35,17 +35,19 @@
 
   async function handleInviteToken(inviteToken) {
     try {
-      const response = await fetch(`${config.serverUrl}/api/rooms/invite/${inviteToken}`);
+      const response = await fetch(
+        `${config.serverUrl}/api/rooms/invite/${inviteToken}`
+      );
       if (response.ok) {
         inviteRoom = await response.json();
         showModule = true;
       } else {
-        alert('Invalid or expired invitation link.');
+        alert("Invalid or expired invitation link.");
       }
     } catch (error) {
-      alert('Failed to load room from invitation link.');
+      alert("Failed to load room from invitation link.");
     }
-    
+
     // Clean up URL
     window.history.replaceState({}, document.title, window.location.pathname);
   }
@@ -57,12 +59,12 @@
         inviteRoom = await response.json();
         showModule = true;
       } else {
-        alert('Invitation link is invalid or room no longer exists.');
+        alert("Invitation link is invalid or room no longer exists.");
       }
     } catch (error) {
-      alert('Failed to load room from invitation link.');
+      alert("Failed to load room from invitation link.");
     }
-    
+
     // Clean up URL
     window.history.replaceState({}, document.title, window.location.pathname);
   }
@@ -79,26 +81,28 @@
 
   async function handleQuickJoin() {
     if (!quickJoinCode) return;
-    
+
     try {
       // Convert to number for validation
       const roomCode = parseInt(quickJoinCode);
       if (isNaN(roomCode) || roomCode < 100000 || roomCode > 999999) {
-        alert('Please enter a valid 6-digit room code.');
+        alert("Please enter a valid 6-digit room code.");
         return;
       }
-      
-      const response = await fetch(`${config.serverUrl}/api/rooms/code/${roomCode}`);
+
+      const response = await fetch(
+        `${config.serverUrl}/api/rooms/code/${roomCode}`
+      );
       if (response.ok) {
         const room = await response.json();
         inviteRoom = room;
         showModule = true;
-        quickJoinCode = '';
+        quickJoinCode = "";
       } else {
-        alert('Room code not found. Please check the code and try again.');
+        alert("Room code not found. Please check the code and try again.");
       }
     } catch (error) {
-      alert('Failed to join room. Please try again.');
+      alert("Failed to join room. Please try again.");
     }
   }
 </script>
@@ -108,8 +112,11 @@
     <div class="hero-content">
       <div class="hero-text">
         <h1>💬 Connect & Negotiate</h1>
-        <p class="hero-subtitle">The modern messaging platform for group discussions and collaborative decision making</p>
-        
+        <p class="hero-subtitle">
+          The modern messaging platform for group discussions and collaborative
+          decision making
+        </p>
+
         <div class="hero-stats">
           <div class="stat">
             <span class="stat-number">⚡</span>
@@ -129,18 +136,22 @@
           <button class="primary-btn" onclick={toggleModule}>
             🚀 Start Messaging
           </button>
-          
+
           <div class="quick-join">
-            <input 
+            <input
               type="number"
               bind:value={quickJoinCode}
               placeholder="Enter 6-digit room code..."
               class="code-input"
               min="100000"
               max="999999"
-              onkeypress={(e) => e.key === 'Enter' && handleQuickJoin()}
+              onkeypress={(e) => e.key === "Enter" && handleQuickJoin()}
             />
-            <button class="join-code-btn" onclick={handleQuickJoin} disabled={!quickJoinCode}>
+            <button
+              class="join-code-btn"
+              onclick={handleQuickJoin}
+              disabled={!quickJoinCode}
+            >
               Join
             </button>
           </div>
@@ -184,12 +195,15 @@
   <div class="features-section">
     <div class="container">
       <h2>✨ Why Choose Our Platform?</h2>
-      
+
       <div class="feature-showcase">
         <div class="feature-highlight">
           <div class="feature-icon-large">📤</div>
           <h3>Smart Invitations</h3>
-          <p>Share room codes, email invites, or social media links. Join with just a code!</p>
+          <p>
+            Share room codes, email invites, or social media links. Join with
+            just a code!
+          </p>
           <div class="feature-demo">
             <div class="demo-code">ABC123</div>
             <div class="demo-links">
@@ -203,7 +217,10 @@
         <div class="feature-highlight">
           <div class="feature-icon-large">🤝</div>
           <h3>Group Negotiations</h3>
-          <p>Make decisions together with built-in voting system and real-time results.</p>
+          <p>
+            Make decisions together with built-in voting system and real-time
+            results.
+          </p>
           <div class="feature-demo">
             <div class="demo-proposal">"Extend deadline by 1 week"</div>
             <div class="demo-votes">
@@ -216,7 +233,10 @@
         <div class="feature-highlight">
           <div class="feature-icon-large">⚡</div>
           <h3>Real-time Everything</h3>
-          <p>See typing indicators, live user presence, and instant message delivery.</p>
+          <p>
+            See typing indicators, live user presence, and instant message
+            delivery.
+          </p>
           <div class="feature-demo">
             <div class="demo-users">
               <div class="user-indicator online"></div>
@@ -236,11 +256,19 @@
         <div class="config-grid">
           <div class="config-item">
             <label for="username">Your Username</label>
-            <input id="username" bind:value={config.username} placeholder="Enter your name" />
+            <input
+              id="username"
+              bind:value={config.username}
+              placeholder="Enter your name"
+            />
           </div>
           <div class="config-item">
             <label for="serverUrl">Server URL</label>
-            <input id="serverUrl" bind:value={config.serverUrl} placeholder="http://localhost:3000" />
+            <input
+              id="serverUrl"
+              bind:value={config.serverUrl}
+              placeholder="http://localhost:3000"
+            />
           </div>
         </div>
       </div>
@@ -268,7 +296,7 @@
   }
 
   .hero-section::before {
-    content: '';
+    content: "";
     position: absolute;
     top: 0;
     left: 0;
@@ -532,18 +560,38 @@
     animation: typingPreview 1.4s ease-in-out infinite;
   }
 
-  .typing-dots-preview span:nth-child(1) { animation-delay: 0s; }
-  .typing-dots-preview span:nth-child(2) { animation-delay: 0.2s; }
-  .typing-dots-preview span:nth-child(3) { animation-delay: 0.4s; }
+  .typing-dots-preview span:nth-child(1) {
+    animation-delay: 0s;
+  }
+  .typing-dots-preview span:nth-child(2) {
+    animation-delay: 0.2s;
+  }
+  .typing-dots-preview span:nth-child(3) {
+    animation-delay: 0.4s;
+  }
 
   @keyframes slideIn {
-    from { opacity: 0; transform: translateY(20px); }
-    to { opacity: 1; transform: translateY(0); }
+    from {
+      opacity: 0;
+      transform: translateY(20px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
   }
 
   @keyframes typingPreview {
-    0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
-    30% { transform: translateY(-4px); opacity: 1; }
+    0%,
+    60%,
+    100% {
+      transform: translateY(0);
+      opacity: 0.4;
+    }
+    30% {
+      transform: translateY(-4px);
+      opacity: 1;
+    }
   }
 
   /* Features Section */
@@ -612,7 +660,7 @@
   }
 
   .demo-code {
-    font-family: 'Courier New', monospace;
+    font-family: "Courier New", monospace;
     font-size: 1.5em;
     font-weight: bold;
     color: #667eea;
@@ -692,8 +740,13 @@
   }
 
   @keyframes pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.5; }
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.5;
+    }
   }
 
   /* Config Section */
@@ -750,32 +803,32 @@
       gap: 40px;
       text-align: center;
     }
-    
+
     .hero-text h1 {
       font-size: 2.5em;
     }
-    
+
     .hero-stats {
       justify-content: center;
     }
-    
+
     .chat-preview {
       max-width: 300px;
     }
-    
+
     .features-section {
       padding: 60px 20px;
     }
-    
+
     .feature-showcase {
       grid-template-columns: 1fr;
       gap: 30px;
     }
-    
+
     .feature-highlight {
       padding: 30px 20px;
     }
-    
+
     .config-grid {
       grid-template-columns: 1fr;
     }
@@ -785,33 +838,34 @@
     .hero-section {
       padding: 60px 15px;
     }
-    
+
     .hero-text h1 {
       font-size: 2em;
     }
-    
+
     .hero-subtitle {
       font-size: 1.1em;
     }
-    
+
     .hero-stats {
       flex-direction: column;
       gap: 20px;
     }
-    
+
     .primary-btn {
       padding: 14px 28px;
       font-size: 16px;
     }
-    
+
     .quick-join {
       flex-direction: column;
       gap: 10px;
       padding: 15px;
       border-radius: 15px;
     }
-    
-    .code-input, .join-code-btn {
+
+    .code-input,
+    .join-code-btn {
       border-radius: 10px;
     }
   }

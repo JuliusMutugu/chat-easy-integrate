@@ -14,17 +14,20 @@ A lightweight, embeddable messaging module for group negotiations and temporary 
 ## 🚀 Quick Start
 
 ### Prerequisites
-- Node.js 16+ 
+
+- Node.js 16+
 - npm or yarn
 
 ### Installation
 
 1. **Install dependencies:**
+
    ```bash
    npm run install-all
    ```
 
 2. **Start development server:**
+
    ```bash
    npm run dev
    ```
@@ -37,12 +40,12 @@ A lightweight, embeddable messaging module for group negotiations and temporary 
 ### Basic Usage
 
 ```javascript
-import MessagingModule from './lib/MessagingModule.svelte';
+import MessagingModule from "./lib/MessagingModule.svelte";
 
 let config = {
-  serverUrl: 'http://your-server.com',
-  username: 'user123',
-  theme: 'modern'
+  serverUrl: "http://your-server.com",
+  username: "user123",
+  theme: "modern",
 };
 
 function handleClose() {
@@ -56,11 +59,11 @@ function handleClose() {
 
 ### Configuration Options
 
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
+| Option      | Type   | Default                 | Description        |
+| ----------- | ------ | ----------------------- | ------------------ |
 | `serverUrl` | string | `http://localhost:3000` | Backend server URL |
-| `username` | string | Required | User display name |
-| `theme` | string | `modern` | UI theme |
+| `username`  | string | Required                | User display name  |
+| `theme`     | string | `modern`                | UI theme           |
 
 ## 🏗️ Architecture
 
@@ -91,12 +94,14 @@ function handleClose() {
 ### Socket Events
 
 #### Client → Server
+
 - `join-room` - Join a chat room
 - `send-message` - Send a message
 - `start-negotiation` - Start group negotiation
 - `vote` - Cast vote on negotiation
 
 #### Server → Client
+
 - `message-history` - Historical messages
 - `new-message` - New message received
 - `user-joined/left` - User presence updates
@@ -137,11 +142,13 @@ npm start
 ## 🌐 Production Deployment
 
 1. **Build the client:**
+
    ```bash
    npm run build
    ```
 
 2. **Set environment variables:**
+
    ```bash
    export PORT=3000
    export NODE_ENV=production
@@ -162,6 +169,7 @@ npm start
 ## 🎨 Customization
 
 ### Styling
+
 The components use CSS custom properties that can be overridden:
 
 ```css
@@ -174,6 +182,7 @@ The components use CSS custom properties that can be overridden:
 ```
 
 ### Component Extension
+
 Extend functionality by modifying the Svelte components in `client/src/lib/`.
 
 ## 🤝 Contributing

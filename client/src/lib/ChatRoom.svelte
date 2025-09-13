@@ -1,19 +1,19 @@
 <script>
-  import { onMount, onDestroy } from 'svelte';
-  
+  import { onMount, onDestroy } from "svelte";
+
   export let socket = null;
   export let config = {};
   export let room = {};
   export let onLeaveRoom = () => {};
 
   let messages = [];
-  let newMessage = '';
+  let newMessage = "";
   let users = [];
   let userCount = 0;
   let isNegotiationActive = false;
   let currentNegotiation = null;
   let showNegotiationForm = false;
-  let negotiationProposal = '';
+  let negotiationProposal = "";
   let messagesContainer;
   let typingUsers = [];
   let typingTimeout;
@@ -32,144 +32,231 @@
   });
 
   function joinRoom() {
-    socket.emit('join-room', {
+    socket.emit("join-room", {
       roomId: room.id,
-      username: config.username
+      username: config.username,
     });
   }
 
   function setupSocketListeners() {
-    socket.on('message-history', (history) => {
+    socket.on("message-history", (history) => {
       messages = history;
       scrollToBottom();
     });
 
-    socket.on('new-message', (message) => {
+    socket.on("new-message", (message) => {
       messages = [...messages, message];
       scrollToBottom();
     });
 
-    socket.on('user-joined', (data) => {
+    socket.on("user-joined", (data) => {
       const systemMessage = {
         id: Date.now(),
-        type: 'system',
+        type: "system",
         message: `${data.username} joined the room`,
-        timestamp: new Date()
+        timestamp: new Date(),
       };
       messages = [...messages, systemMessage];
       scrollToBottom();
     });
 
-    socket.on('user-left', (data) => {
+    socket.on("user-left", (data) => {
       const systemMessage = {
         id: Date.now(),
-        type: 'system',
+        type: "system",
         message: `${data.username} left the room`,
-        timestamp: new Date()
+        timestamp: new Date(),
       };
       messages = [...messages, systemMessage];
       scrollToBottom();
     });
 
-    socket.on('room-update', (data) => {
+    socket.on("room-update", (data) => {
       users = data.users || [];
       userCount = data.userCount || 0;
     });
 
-    socket.on('negotiation-started', (data) => {
+    socket.on("negotiation-started", (data) => {
       isNegotiationActive = true;
       currentNegotiation = {
         proposer: data.proposer,
         proposal: data.proposal,
         proposalId: data.proposalId,
         votes: new Map(),
-        hasVoted: false
+        hasVoted: false,
       };
-      
+
       const systemMessage = {
         id: Date.now(),
-        type: 'negotiation-start',
+        type: "negotiation-start",
         message: `${data.proposer} started a negotiation: "${data.proposal}"`,
-        timestamp: new Date()
+        timestamp: new Date(),
       };
       messages = [...messages, systemMessage];
       scrollToBottom();
     });
 
-    socket.on('vote-cast', (data) => {
+    socket.on("vote-cast", (data) => {
       if (currentNegotiation) {
         currentNegotiation.votes.set(data.username, data.vote);
-        
+
         const systemMessage = {
           id: Date.now(),
-          type: 'vote',
+          type: "vote",
           message: `${data.username} voted ${data.vote}`,
-          timestamp: new Date()
+          timestamp: new Date(),
         };
         messages = [...messages, systemMessage];
         scrollToBottom();
       }
     });
 
-    socket.on('negotiation-completed', (data) => {
+    socket.on("negotiation-completed", (data) => {
       isNegotiationActive = false;
-      
+
       const systemMessage = {
         id: Date.now(),
-        type: 'negotiation-end',
+        type: "negotiation-end",
         message: `Negotiation ${data.result}! Votes: ${data.votes.approve} approve, ${data.votes.reject} reject`,
-        timestamp: new Date()
+        timestamp: new Date(),
       };
       messages = [...messages, systemMessage];
       currentNegotiation = null;
       scrollToBottom();
     });
 
-    socket.on('user-typing', (data) => {
+    socket.on("user-typing", (data) => {
       if (data.username !== config.username) {
-        typingUsers = [...typingUsers.filter(u => u !== data.username), data.username];
+        typingUsers = [
+          ...typingUsers.filter((u) => u !== data.username),
+          data.username,
+        ];
       }
     });
 
-    socket.on('user-stop-typing', (data) => {
-      typingUsers = typingUsers.filter(u => u !== data.username);
+    socket.on("user-stop-typing", (data) => {
+      typingUsers = typingUsers.filter((u) => u !== data.username);
     });
   }
 
   function removeSocketListeners() {
-    socket.off('message-history');
-    socket.off('new-message');
-    socket.off('user-joined');
-    socket.off('user-left');
-    socket.off('room-update');
-    socket.off('negotiation-started');
-    socket.off('vote-cast');
-    socket.off('negotiation-completed');
+    socket.off("message-history");
+    socket.off("new-message");
+    socket.off("user-joined");
+    socket.off("user-left");
+    socket.off("room-update");
+    socket.off("negotiation-started");
+    socket.off("vote-cast");
+    socket.off("negotiation-completed");
   }
 
   function sendMessage() {
     if (!newMessage.trim() || !socket) return;
 
-    socket.emit('send-message', {
+    socket.emit("send-message", {
       message: newMessage.trim(),
-      type: 'text'
+      type: "text",
     });
 
-    newMessage = '';
+    newMessage = "";
+  }
+
+  async function shareLocation() {
+    if (!socket) return;
+
+    if (!navigator.geolocation) {
+      alert("Geolocation is not supported by this browser.");
+      return;
+    }
+
+    try {
+      // Show loading state
+      const loadingMessage = {
+        id: Date.now(),
+        username: config.username,
+        message: "Sharing location...",
+        type: "location-loading",
+        timestamp: new Date(),
+      };
+      messages = [...messages, loadingMessage];
+      scrollToBottom();
+
+      const position = await getCurrentPosition();
+      const { latitude, longitude } = position.coords;
+
+      // Remove loading message
+      messages = messages.filter((m) => m.id !== loadingMessage.id);
+
+      // Send location message
+      socket.emit("send-message", {
+        message: `📍 Live location shared`,
+        type: "location",
+        location: {
+          latitude,
+          longitude,
+          accuracy: position.coords.accuracy,
+          timestamp: new Date().toISOString(),
+        },
+      });
+    } catch (error) {
+      // Remove loading message if it exists
+      messages = messages.filter((m) => m.type !== "location-loading");
+
+      if (error.code === error.PERMISSION_DENIED) {
+        alert(
+          "Location access denied. Please allow location access to share your location."
+        );
+      } else if (error.code === error.POSITION_UNAVAILABLE) {
+        alert("Location information is unavailable.");
+      } else if (error.code === error.TIMEOUT) {
+        alert("Location request timed out.");
+      } else {
+        alert("An error occurred while retrieving your location.");
+      }
+    }
+  }
+
+  function getCurrentPosition() {
+    return new Promise((resolve, reject) => {
+      navigator.geolocation.getCurrentPosition(resolve, reject, {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 60000, // Cache for 1 minute
+      });
+    });
+  }
+
+  function openLocationInMaps(latitude, longitude) {
+    // Try to open in Google Maps, fallback to other map services
+    const googleMapsUrl = `https://www.google.com/maps?q=${latitude},${longitude}`;
+    const appleMapsUrl = `https://maps.apple.com/?q=${latitude},${longitude}`;
+    const bingMapsUrl = `https://www.bing.com/maps?q=${latitude},${longitude}`;
+
+    // Detect user agent and open appropriate map
+    const userAgent = navigator.userAgent.toLowerCase();
+
+    if (userAgent.includes("iphone") || userAgent.includes("ipad")) {
+      window.open(appleMapsUrl, "_blank");
+    } else {
+      window.open(googleMapsUrl, "_blank");
+    }
   }
 
   function handleKeyPress(event) {
-    if (event.key === 'Enter' && !event.shiftKey) {
+    if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       sendMessage();
     } else {
       // Handle typing indicator
       if (socket && newMessage.trim()) {
-        socket.emit('typing', { roomId: room.id, username: config.username });
-        
+        socket.emit("typing", { roomId: room.id, username: config.username });
+
         clearTimeout(typingTimeout);
         typingTimeout = setTimeout(() => {
-          socket.emit('stop-typing', { roomId: room.id, username: config.username });
+          socket.emit("stop-typing", {
+            roomId: room.id,
+            username: config.username,
+          });
         }, 1000);
       }
     }
@@ -178,20 +265,20 @@
   function startNegotiation() {
     if (!negotiationProposal.trim() || !socket) return;
 
-    socket.emit('start-negotiation', {
-      proposal: negotiationProposal.trim()
+    socket.emit("start-negotiation", {
+      proposal: negotiationProposal.trim(),
     });
 
-    negotiationProposal = '';
+    negotiationProposal = "";
     showNegotiationForm = false;
   }
 
   function vote(voteType) {
     if (!currentNegotiation || currentNegotiation.hasVoted || !socket) return;
 
-    socket.emit('vote', {
+    socket.emit("vote", {
       proposalId: currentNegotiation.proposalId,
-      vote: voteType
+      vote: voteType,
     });
 
     currentNegotiation.hasVoted = true;
@@ -206,19 +293,19 @@
   }
 
   function formatTime(timestamp) {
-    return new Date(timestamp).toLocaleTimeString([], { 
-      hour: '2-digit', 
-      minute: '2-digit' 
+    return new Date(timestamp).toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
     });
   }
 
   function getMessageClass(message) {
-    if (message.type === 'system') return 'system-message';
-    if (message.type === 'negotiation-start') return 'negotiation-message';
-    if (message.type === 'negotiation-end') return 'negotiation-end-message';
-    if (message.type === 'vote') return 'vote-message';
-    if (message.username === config.username) return 'own-message';
-    return 'other-message';
+    if (message.type === "system") return "system-message";
+    if (message.type === "negotiation-start") return "negotiation-message";
+    if (message.type === "negotiation-end") return "negotiation-end-message";
+    if (message.type === "vote") return "vote-message";
+    if (message.username === config.username) return "own-message";
+    return "other-message";
   }
 </script>
 
@@ -231,10 +318,13 @@
         <span class="user-info">👥 {userCount} users online</span>
       </div>
     </div>
-    
+
     <div class="room-actions">
       {#if !isNegotiationActive}
-        <button class="negotiate-btn" onclick={() => showNegotiationForm = !showNegotiationForm}>
+        <button
+          class="negotiate-btn"
+          onclick={() => (showNegotiationForm = !showNegotiationForm)}
+        >
           🤝 Start Negotiation
         </button>
       {:else}
@@ -247,14 +337,17 @@
     <div class="negotiation-form">
       <div class="form-content">
         <h4>🤝 Start Group Negotiation</h4>
-        <textarea 
+        <textarea
           bind:value={negotiationProposal}
           placeholder="Describe your proposal..."
           rows="2"
         ></textarea>
         <div class="form-actions">
-          <button onclick={() => showNegotiationForm = false}>Cancel</button>
-          <button onclick={startNegotiation} disabled={!negotiationProposal.trim()}>
+          <button onclick={() => (showNegotiationForm = false)}>Cancel</button>
+          <button
+            onclick={startNegotiation}
+            disabled={!negotiationProposal.trim()}
+          >
             Start Negotiation
           </button>
         </div>
@@ -268,13 +361,13 @@
         <h4>🤝 Active Negotiation</h4>
         <p><strong>Proposal:</strong> {currentNegotiation.proposal}</p>
         <p><strong>Proposed by:</strong> {currentNegotiation.proposer}</p>
-        
+
         {#if !currentNegotiation.hasVoted && currentNegotiation.proposer !== config.username}
           <div class="vote-buttons">
-            <button class="approve-btn" onclick={() => vote('approve')}>
+            <button class="approve-btn" onclick={() => vote("approve")}>
               ✅ Approve
             </button>
-            <button class="reject-btn" onclick={() => vote('reject')}>
+            <button class="reject-btn" onclick={() => vote("reject")}>
               ❌ Reject
             </button>
           </div>
@@ -290,18 +383,61 @@
   <div class="messages-container" bind:this={messagesContainer}>
     {#each messages as message}
       <div class="message {getMessageClass(message)}">
-        {#if message.type === 'text'}
+        {#if message.type === "text"}
           <div class="message-header">
             <span class="username">{message.username}</span>
             <span class="timestamp">{formatTime(message.timestamp)}</span>
           </div>
           <div class="message-content">{message.message}</div>
+        {:else if message.type === "location"}
+          <div class="message-header">
+            <span class="username">{message.username}</span>
+            <span class="timestamp">{formatTime(message.timestamp)}</span>
+          </div>
+          <div class="location-message">
+            <div class="location-content">
+              <div class="location-text">
+                📍 {message.message}
+              </div>
+              <div class="location-details">
+                <small
+                  >Lat: {message.location.latitude.toFixed(6)}, Lng: {message.location.longitude.toFixed(
+                    6
+                  )}</small
+                >
+                {#if message.location.accuracy}
+                  <small
+                    >Accuracy: ±{Math.round(message.location.accuracy)}m</small
+                  >
+                {/if}
+              </div>
+              <button
+                class="open-maps-btn"
+                onclick={() =>
+                  openLocationInMaps(
+                    message.location.latitude,
+                    message.location.longitude
+                  )}
+              >
+                🗺️ Open in Maps
+              </button>
+            </div>
+          </div>
+        {:else if message.type === "location-loading"}
+          <div class="message-header">
+            <span class="username">{message.username}</span>
+            <span class="timestamp">{formatTime(message.timestamp)}</span>
+          </div>
+          <div class="location-loading">
+            <span class="loading-spinner">🔄</span>
+            {message.message}
+          </div>
         {:else}
           <div class="system-content">
             <span class="system-icon">
-              {#if message.type === 'negotiation-start'}🤝
-              {:else if message.type === 'negotiation-end'}🏁
-              {:else if message.type === 'vote'}🗳️
+              {#if message.type === "negotiation-start"}🤝
+              {:else if message.type === "negotiation-end"}🏁
+              {:else if message.type === "vote"}🗳️
               {:else}ℹ️{/if}
             </span>
             {message.message}
@@ -320,10 +456,9 @@
             <span></span>
           </div>
           <span class="typing-text">
-            {typingUsers.length === 1 
-              ? `${typingUsers[0]} is typing...` 
-              : `${typingUsers.slice(0, 2).join(', ')}${typingUsers.length > 2 ? ` and ${typingUsers.length - 2} others` : ''} are typing...`
-            }
+            {typingUsers.length === 1
+              ? `${typingUsers[0]} is typing...`
+              : `${typingUsers.slice(0, 2).join(", ")}${typingUsers.length > 2 ? ` and ${typingUsers.length - 2} others` : ""} are typing...`}
           </span>
         </div>
       </div>
@@ -332,13 +467,26 @@
 
   <div class="message-input">
     <div class="input-container">
-      <textarea 
+      <div class="input-actions">
+        <button
+          class="location-btn"
+          onclick={shareLocation}
+          title="Share live location"
+        >
+          📍
+        </button>
+      </div>
+      <textarea
         bind:value={newMessage}
         placeholder="Type your message..."
         rows="1"
         onkeypress={handleKeyPress}
       ></textarea>
-      <button onclick={sendMessage} disabled={!newMessage.trim()}>
+      <button
+        class="send-btn"
+        onclick={sendMessage}
+        disabled={!newMessage.trim()}
+      >
         📤
       </button>
     </div>
@@ -544,7 +692,10 @@
     align-self: flex-start;
   }
 
-  .system-message, .negotiation-message, .negotiation-end-message, .vote-message {
+  .system-message,
+  .negotiation-message,
+  .negotiation-end-message,
+  .vote-message {
     align-self: center;
     max-width: 90%;
     text-align: center;
@@ -641,19 +792,70 @@
     animation: typing 1.4s ease-in-out infinite;
   }
 
-  .typing-dots span:nth-child(1) { animation-delay: 0s; }
-  .typing-dots span:nth-child(2) { animation-delay: 0.2s; }
-  .typing-dots span:nth-child(3) { animation-delay: 0.4s; }
+  .typing-dots span:nth-child(1) {
+    animation-delay: 0s;
+  }
+  .typing-dots span:nth-child(2) {
+    animation-delay: 0.2s;
+  }
+  .typing-dots span:nth-child(3) {
+    animation-delay: 0.4s;
+  }
 
   @keyframes typing {
-    0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
-    30% { transform: translateY(-6px); opacity: 1; }
+    0%,
+    60%,
+    100% {
+      transform: translateY(0);
+      opacity: 0.4;
+    }
+    30% {
+      transform: translateY(-6px);
+      opacity: 1;
+    }
   }
 
   .message-input {
     padding: 15px 20px;
     border-top: 1px solid #e1e5e9;
     background: white;
+  }
+
+  .input-container {
+    display: flex;
+    align-items: flex-end;
+    gap: 10px;
+    max-width: 800px;
+    margin: 0 auto;
+  }
+
+  .input-actions {
+    display: flex;
+    gap: 5px;
+  }
+
+  .location-btn {
+    background: #28a745;
+    color: white;
+    border: none;
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    cursor: pointer;
+    font-size: 16px;
+    transition: all 0.3s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .location-btn:hover {
+    background: #218838;
+    transform: scale(1.05);
+  }
+
+  .location-btn:active {
+    transform: scale(0.95);
   }
 
   .input-container {
@@ -702,6 +904,100 @@
     transform: none;
   }
 
+  /* Location Message Styles */
+  .location-message {
+    background: #e8f5e8;
+    border: 1px solid #c3e6c3;
+    border-radius: 10px;
+    padding: 12px;
+    margin-top: 5px;
+  }
+
+  .location-content {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .location-text {
+    font-weight: 500;
+    color: #2d5a2d;
+  }
+
+  .location-details {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    color: #666;
+    font-size: 12px;
+  }
+
+  .open-maps-btn {
+    background: #007bff;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    padding: 8px 12px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 500;
+    transition: all 0.3s ease;
+    align-self: flex-start;
+  }
+
+  .open-maps-btn:hover {
+    background: #0056b3;
+    transform: translateY(-1px);
+  }
+
+  .location-loading {
+    background: #fff3cd;
+    border: 1px solid #ffeaa7;
+    border-radius: 10px;
+    padding: 12px;
+    margin-top: 5px;
+    color: #856404;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .loading-spinner {
+    animation: spin 1s linear infinite;
+  }
+
+  @keyframes spin {
+    0% {
+      transform: rotate(0deg);
+    }
+    100% {
+      transform: rotate(360deg);
+    }
+  }
+
+  .send-btn {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border: none;
+    width: 45px;
+    height: 45px;
+    border-radius: 50%;
+    cursor: pointer;
+    transition: all 0.3s;
+    font-size: 16px;
+  }
+
+  .send-btn:hover:not(:disabled) {
+    transform: scale(1.1);
+    box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+  }
+
+  .send-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+  }
+
   @media (max-width: 768px) {
     .chat-header {
       padding: 10px 15px;
@@ -709,19 +1005,19 @@
       gap: 10px;
       align-items: stretch;
     }
-    
+
     .room-info {
       justify-content: space-between;
     }
-    
+
     .message {
       max-width: 85%;
     }
-    
+
     .messages-container {
       padding: 15px;
     }
-    
+
     .message-input {
       padding: 10px 15px;
     }

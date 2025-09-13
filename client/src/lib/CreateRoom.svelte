@@ -4,18 +4,18 @@
   export let onBack = () => {};
 
   let formData = {
-    name: '',
-    description: '',
-    maxUsers: 10
+    name: "",
+    description: "",
+    maxUsers: 10,
   };
   let isSubmitting = false;
   let error = null;
 
   async function handleSubmit(event) {
     event.preventDefault();
-    
+
     if (!formData.name.trim()) {
-      error = 'Room name is required';
+      error = "Room name is required";
       return;
     }
 
@@ -24,20 +24,20 @@
 
     try {
       const response = await fetch(`${config.serverUrl}/api/rooms`, {
-        method: 'POST',
+        method: "POST",
         headers: {
-          'Content-Type': 'application/json'
+          "Content-Type": "application/json",
         },
-        body: JSON.stringify(formData)
+        body: JSON.stringify(formData),
       });
 
       if (response.ok) {
         onRoomCreated();
       } else {
-        error = 'Failed to create room';
+        error = "Failed to create room";
       }
     } catch (err) {
-      error = 'Network error occurred';
+      error = "Network error occurred";
     } finally {
       isSubmitting = false;
     }
@@ -60,9 +60,9 @@
 
       <div class="form-group">
         <label for="roomName">Room Name *</label>
-        <input 
+        <input
           id="roomName"
-          type="text" 
+          type="text"
           bind:value={formData.name}
           placeholder="Enter room name"
           required
@@ -72,7 +72,7 @@
 
       <div class="form-group">
         <label for="roomDescription">Description</label>
-        <textarea 
+        <textarea
           id="roomDescription"
           bind:value={formData.description}
           placeholder="Describe what this room is for..."
@@ -84,9 +84,9 @@
 
       <div class="form-group">
         <label for="maxUsers">Maximum Users</label>
-        <input 
+        <input
           id="maxUsers"
-          type="number" 
+          type="number"
           bind:value={formData.maxUsers}
           min="2"
           max="50"
@@ -99,7 +99,7 @@
           Cancel
         </button>
         <button type="submit" class="submit-btn" disabled={isSubmitting}>
-          {isSubmitting ? '⏳ Creating...' : '✨ Create Room'}
+          {isSubmitting ? "⏳ Creating..." : "✨ Create Room"}
         </button>
       </div>
     </form>
@@ -295,7 +295,7 @@
   }
 
   .tips li:before {
-    content: '✓';
+    content: "✓";
     color: #4caf50;
     font-weight: bold;
     margin-right: 10px;
@@ -307,11 +307,11 @@
       gap: 20px;
       padding: 15px;
     }
-    
+
     form {
       padding: 20px;
     }
-    
+
     .form-actions {
       flex-direction: column;
     }
