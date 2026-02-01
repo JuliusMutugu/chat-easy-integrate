@@ -6,8 +6,9 @@
   import CreateRoom from "./CreateRoom.svelte";
   import Settings from "./Settings.svelte";
   import Integrations from "./Integrations.svelte";
+  import Campaigns from "./Campaigns.svelte";
   import Chatbot from "./Chatbot.svelte";
-  import { playOpen, getAvatar, getWorkflowConfig, setWorkflowConfig, getAssignedAgentTemplate, getAssignedToDisplay } from "./theme.js";
+  import { playOpen, getAvatar, getWorkflowConfig, setWorkflowConfig, getAssignedAgentTemplate, getAssignedToDisplay, safeParseJson } from "./theme.js";
 
   export let config = {
     serverUrl: "http://localhost:3000",
@@ -16,6 +17,7 @@
   };
   export let inviteRoom = null;
   export let inviteToken = null;
+  export let user = null;
   export let onClose = () => {};
 
   let socket = null;
@@ -119,7 +121,7 @@
     }
     if (p.startsWith("workflows/train/")) {
       const template = p.slice("workflows/train/".length).replace(/\/$/, "");
-      if (["sales-engineer", "marketing-engineer", "receptionist"].includes(template)) {
+      if (["sales-engineer", "marketing-engineer", "receptionist", "chat-widget"].includes(template)) {
         currentView = "workflow-train";
         workflowTrainTemplate = template;
         loadWorkflowTrainData();
@@ -316,7 +318,8 @@
         body: JSON.stringify(payload),
       });
       if (!res.ok) return;
-      const updated = await res.json();
+      const updated = await safeParseJson(res);
+      if (!updated) return;
       rooms = rooms.map((r) => (r.id === roomId ? { ...r, ...updated } : r));
       if (currentRoom && currentRoom.id === roomId) currentRoom = { ...currentRoom, ...updated };
     } catch (_) {}
@@ -337,11 +340,12 @@
     if (!inviteToken || !config.username || !config.serverUrl) return;
     try {
       const res = await fetch(
-        `${config.serverUrl}/api/rooms/invite/${inviteToken}/status?username=${encodeURIComponent(config.username)}`
+        `${config.serverUrl}/api/rooms/invite/${inviteToken}/status?username=${encodeURIComponent(config.username)}`,
+        { credentials: "include" }
       );
       if (!res.ok) return;
-      const data = await res.json();
-      if (data.accepted && data.room) {
+      const data = await safeParseJson(res);
+      if (data && data.accepted && data.room) {
         inviteStatusAccepted = true;
         if (invitePollTimer) {
           clearInterval(invitePollTimer);
@@ -461,10 +465,11 @@
     if (!config.username) return;
     try {
       const res = await fetch(
-        `${config.serverUrl}/api/rooms/pending-requests?creator=${encodeURIComponent(config.username)}`
+        `${config.serverUrl}/api/rooms/pending-requests?creator=${encodeURIComponent(config.username)}`,
+        { credentials: "include" }
       );
-      const list = await res.json();
-      pendingRequests = (list || []).map((p) => ({
+      const list = await safeParseJson(res);
+      pendingRequests = (Array.isArray(list) ? list : []).map((p) => ({
         requestId: p.requestId,
         roomId: p.roomId,
         roomName: p.roomName,
@@ -480,8 +485,9 @@
       const url = config.username
         ? `${config.serverUrl}/api/rooms?username=${encodeURIComponent(config.username)}`
         : `${config.serverUrl}/api/rooms`;
-      const response = await fetch(url);
-      rooms = await response.json();
+      const response = await fetch(url, { credentials: "include" });
+      const data = await safeParseJson(response);
+      rooms = Array.isArray(data) ? data : [];
     } catch (err) {
       error = "Failed to load rooms";
     }
@@ -575,7 +581,7 @@
       }
     }
     if (!workflowContext) {
-      for (const t of ["sales-engineer", "marketing-engineer", "receptionist"]) {
+      for (const t of ["sales-engineer", "marketing-engineer", "receptionist", "chat-widget"]) {
         const c = getWorkflowConfig(t);
         if (c && (c.instructions || c.product || c.kpis || c.websiteText || c.documentText)) {
           workflowContext = {
@@ -594,8 +600,8 @@
         credentials: "include",
         body: JSON.stringify({ roomId: currentRoom.id, workflowContext }),
       });
-      const data = await res.json().catch(() => ({}));
-      if (res.ok && data.reply) {
+      const data = await safeParseJson(res) || {};
+      if (res.ok && data?.reply) {
         messageDraft = data.reply;
         addNotification("info", "AI reply inserted. Edit if needed and send.", 4000);
       } else {
@@ -629,7 +635,11 @@
         credentials: "include",
         body: JSON.stringify({ url }),
       });
-      const data = await res.json().catch(() => ({}));
+      const text = await res.text();
+      let data = {};
+      try {
+        data = text && text.startsWith("{") ? JSON.parse(text) : {};
+      } catch (_) {}
       if (res.ok && data.text) {
         workflowTrainWebsiteText = (workflowTrainWebsiteText ? workflowTrainWebsiteText + "\n\n" : "") + data.text;
         addNotification("info", "Content added from website.", 4000);
@@ -654,7 +664,11 @@
         method: "POST",
         body: form,
       });
-      const data = await res.json().catch(() => ({}));
+      const text = await res.text();
+      let data = {};
+      try {
+        data = text && text.startsWith("{") ? JSON.parse(text) : {};
+      } catch (_) {}
       if (res.ok && data.text) {
         workflowTrainDocumentText = (workflowTrainDocumentText ? workflowTrainDocumentText + "\n\n" : "") + data.text;
         addNotification("info", "Document content added.", 4000);
@@ -681,13 +695,30 @@
     setWorkflowConfig(workflowTrainTemplate, data);
     if (config.serverUrl) {
       try {
-        await fetch(`${config.serverUrl}/api/workflows/${workflowTrainTemplate}`, {
+        const res = await fetch(`${config.serverUrl}/api/workflows/${workflowTrainTemplate}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "include",
           body: JSON.stringify(data),
         });
-      } catch (_) {}
+        if (!res.ok) {
+          const contentType = res.headers.get("content-type") || "";
+          const text = await res.text();
+          let err = "Server error";
+          if (contentType.includes("application/json")) {
+            try {
+              const j = JSON.parse(text);
+              err = j?.error || text || err;
+            } catch (_) {}
+          } else if (text.startsWith("<")) {
+            err = "Server returned HTML instead of JSON. Check that the backend is running and API routes are reachable.";
+          }
+          throw new Error(err);
+        }
+      } catch (e) {
+        addNotification("warning", e?.message || "Failed to save workflow. Check that you're logged in.", 6000);
+        return;
+      }
     }
     addNotification("info", "Agent saved. Assign a room to this agent to have it auto-respond, or use \"Respond with AI\" in a conversation.", 6000);
     goTo("workflows");
@@ -700,7 +731,9 @@
         ? "Marketing Engineer"
         : workflowTrainTemplate === "receptionist"
           ? "Receptionist"
-          : "Workflow";
+          : workflowTrainTemplate === "chat-widget"
+            ? "Chat Widget"
+            : "Workflow";
 </script>
 
 <svelte:window onclick={() => { if (profileDropdownOpen) closeProfileDropdown(); if (lifecycleNavOpen) lifecycleNavOpen = false; if (teamsNavOpen) teamsNavOpen = false; }} />
@@ -1025,6 +1058,14 @@
                   <p class="workflow-template-desc">Greet contacts, route inquiries, and book meetings. AI handles FAQs and hands off to the right team based on your rules.</p>
                   <button type="button" class="workflow-template-cta" onclick={() => goToWorkflowTrain("receptionist")}>Add your data</button>
                 </article>
+                <article class="workflow-template-card">
+                  <div class="workflow-template-icon workflow-template-icon-widget" aria-hidden="true">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                  </div>
+                  <h3 class="workflow-template-title">Chat Widget</h3>
+                  <p class="workflow-template-desc">Train the embeddable chat widget for your website. Visitors chat as "Visitor-xxx"—configure product, FAQs, and instructions for AI auto-replies.</p>
+                  <button type="button" class="workflow-template-cta" onclick={() => goToWorkflowTrain("chat-widget")}>Add your data</button>
+                </article>
               </div>
             </section>
             <section class="workflows-ai-section" aria-labelledby="workflows-ai-heading">
@@ -1296,9 +1337,16 @@
                     </div>
                   </div>
                 {:else if inboxPage === "campaigns"}
-                  <div class="inbox-placeholder-content">
-                    <h2 class="inbox-placeholder-title">Campaigns</h2>
-                    <p class="inbox-placeholder-desc">Manage your campaigns and campaign-based conversations. Create campaigns to group conversations by campaign.</p>
+                  <div class="view-wrap view-campaigns">
+                    <Campaigns
+                      {config}
+                      {rooms}
+                      onBack={() => goTo("rooms", { inboxPage: "all" })}
+                      onJoinRoom={handleJoinRoom}
+                      onAcceptRequest={handleJoinRequestAccept}
+                      onDeclineRequest={handleJoinRequestDecline}
+                      onRefresh={loadRooms}
+                    />
                   </div>
                 {:else if inboxPage === "vip-clients"}
                   <div class="inbox-placeholder-content">
@@ -2541,6 +2589,11 @@
   .workflow-template-icon-reception {
     background: var(--amber-100, #fef3c7);
     color: var(--amber-700, #b45309);
+  }
+
+  .workflow-template-icon-widget {
+    background: var(--blue-100, #dbeafe);
+    color: var(--blue-700, #1d4ed8);
   }
 
   .workflow-template-title {

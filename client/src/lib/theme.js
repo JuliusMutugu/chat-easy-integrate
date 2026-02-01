@@ -1,4 +1,17 @@
 const THEME_KEY = 'theme';
+
+/** Safely parse JSON from a fetch response. Returns null if body is HTML or invalid JSON (avoids "Unexpected token '<'" error). */
+export async function safeParseJson(res) {
+  const text = await res.text();
+  const t = text?.trimStart() || '';
+  if (!t || t.startsWith('<')) return null;
+  if (!t.startsWith('{') && !t.startsWith('[')) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
 const ACCENT_KEY = 'accent';
 const CHAT_STYLE_KEY = 'chatStyle';
 const SOUND_KEY = 'soundEnabled';
@@ -196,13 +209,14 @@ export function setWorkflowConfig(template, data) {
 export const AGENT_ASSIGN_PREFIX = 'agent:';
 
 /** Agent template keys used in workflows (same as workflow train templates). */
-export const AGENT_TEMPLATES = ['sales-engineer', 'marketing-engineer', 'receptionist'];
+export const AGENT_TEMPLATES = ['sales-engineer', 'marketing-engineer', 'receptionist', 'chat-widget'];
 
 /** Human-readable label for an agent template. */
 const AGENT_LABELS = {
   'sales-engineer': 'Sales Engineer',
   'marketing-engineer': 'Marketing Engineer',
   'receptionist': 'Receptionist',
+  'chat-widget': 'Chat Widget',
 };
 
 /** True if assignedTo value means the room is assigned to an agent. */

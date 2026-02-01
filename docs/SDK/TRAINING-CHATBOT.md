@@ -1,6 +1,6 @@
 # Nego SDK – Training Your Chatbot
 
-To have the embeddable widget respond as an **AI chatbot** (instead of human chat), you must train it the same way we train the global help chatbot: via **Workflows** and **agent assignment**.
+To have the embeddable widget respond as an **AI chatbot** (instead of human chat), you must train it using the **Chat Widget** workflow. This is separate from Sales, Marketing, and Receptionist—use the Chat Widget workflow specifically for your embeddable chat.
 
 ## Overview
 
@@ -9,12 +9,12 @@ To have the embeddable widget respond as an **AI chatbot** (instead of human cha
 
 ## How It Works
 
-The widget connects visitors to a Nego room. When that room is **assigned to an AI agent**, the agent auto-replies to every visitor message. The agent’s behavior is defined by the **Workflow** you configure (product, KPIs, instructions).
+The widget connects visitors to a Nego room. When that room is **assigned to the Chat Widget agent**, the agent auto-replies to every visitor message. The agent’s behavior is defined by the **Chat Widget Workflow** you configure (product, KPIs, instructions).
 
-## Step 1: Configure a Workflow
+## Step 1: Configure the Chat Widget Workflow
 
 1. In Nego, go to **Workflows**
-2. Choose an agent: **Sales Engineer**, **Marketing Engineer**, or **Receptionist**
+2. Choose **Chat Widget** (the workflow for your embeddable widget)
 3. Fill in the training fields:
 
 | Field | Description |
@@ -27,12 +27,12 @@ The widget connects visitors to a Nego room. When that room is **assigned to an 
 
 4. Save the workflow
 
-## Step 2: Assign the Room to the Agent
+## Step 2: Assign the Room to the Chat Widget Agent
 
 1. Open the room used by your embeddable widget
 2. Click **Assign**
-3. Choose the agent you configured (Sales Agent, Marketing Agent, or Receptionist)
-4. The room is now assigned to that agent
+3. Choose **Chat Widget**
+4. The room is now assigned to the Chat Widget agent
 
 ## Step 3: Embed the Widget
 
@@ -48,9 +48,17 @@ Visitors who open the widget will:
 3. Receive **automatic replies** from your trained AI agent
 4. Chat as if with a human, but powered by your workflow
 
+## Why Use the Chat Widget Workflow?
+
+The Chat Widget workflow is separate from Sales, Marketing, and Receptionist. Use it for your embeddable widget because:
+
+- **Dedicated context**: Your website visitors need different training than sales or marketing conversations
+- **Independent config**: You can run sales/marketing agents elsewhere without affecting the widget
+- **Clear purpose**: Product info, FAQs, and instructions scoped to website visitors
+
 ## Same Training Model as the Global Help Chatbot
 
-The global Nego help chatbot is trained with a fixed system prompt (app help topics). Your chatbot is trained the same way: you provide context and instructions via Workflows, and the AI replies accordingly. The only difference is the scope: yours is for your product/support, ours is for Nego app help.
+The global Nego help chatbot is trained with a fixed system prompt (app help topics). Your chatbot is trained the same way: you provide context and instructions via the Chat Widget workflow, and the AI replies accordingly. The only difference is the scope: yours is for your product/support, ours is for Nego app help.
 
 ## Tips
 

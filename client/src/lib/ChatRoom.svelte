@@ -1,6 +1,6 @@
 <script>
   import { onMount, onDestroy } from "svelte";
-  import { playClick, playSuccess, getEnterToSend, getCustomSnippets, getAvatar, agentAssignValue, getAssignedToDisplay, getWorkflowConfig } from "./theme.js";
+  import { playClick, playSuccess, getEnterToSend, getCustomSnippets, getAvatar, agentAssignValue, getAssignedToDisplay, getWorkflowConfig, safeParseJson } from "./theme.js";
   import DealPanel from "./DealPanel.svelte";
   import Calculator from "./Calculator.svelte";
 
@@ -78,7 +78,7 @@
         credentials: "include",
         body: JSON.stringify({ roomId: room.id, allowedOrigins: "*" }),
       });
-      const data = await res.json();
+      const data = await safeParseJson(res) || {};
       if (!res.ok) throw new Error(data.error || "Failed to create widget");
       widgetEmbedCode = data.embedCode || "";
       widgets = [data, ...widgets];
@@ -95,8 +95,8 @@
     try {
       const res = await fetch(`${config.serverUrl}/api/widget/list/${room.id}`, { credentials: "include" });
       if (!res.ok) return;
-      const data = await res.json();
-      widgets = data.widgets || [];
+      const data = await safeParseJson(res);
+      widgets = (data?.widgets && Array.isArray(data.widgets)) ? data.widgets : [];
       if (widgets.length > 0 && !widgetEmbedCode) {
         widgetEmbedCode = widgets[0].embedCode || "";
       }
@@ -122,8 +122,8 @@
         credentials: "include",
       });
       if (res.ok) {
-        const r = await res.json();
-        if (r.inviteToken) {
+        const r = await safeParseJson(res);
+        if (r?.inviteToken) {
           room.inviteToken = r.inviteToken;
           room.code = r.code;
           inviteLinkValue = typeof window !== "undefined" ? `${window.location.origin}?invite=${r.inviteToken}` : "";
@@ -177,11 +177,13 @@
         body: JSON.stringify({ invitedBy: config.username }),
       });
       if (res.ok) {
-        const data = await res.json();
-        room.inviteToken = data.inviteToken;
-        inviteLinkValue = typeof window !== "undefined" ? `${window.location.origin}?invite=${data.inviteToken}` : "";
-        playSuccess();
-        showToast("New invite link generated.");
+        const data = await safeParseJson(res);
+        if (data?.inviteToken) {
+          room.inviteToken = data.inviteToken;
+          inviteLinkValue = typeof window !== "undefined" ? `${window.location.origin}?invite=${data.inviteToken}` : "";
+          playSuccess();
+          showToast("New invite link generated.");
+        }
       }
     } catch (_) {}
   }
@@ -197,7 +199,7 @@
         credentials: "include",
         body: JSON.stringify({ to: inviteEmail.trim() }),
       });
-      const data = await res.json().catch(() => ({}));
+      const data = await safeParseJson(res) || {};
       if (!res.ok) {
         emailError = data.error || "Failed to send email";
         return;
@@ -224,7 +226,8 @@
         body: JSON.stringify({ assignedTo: usernameOrAgentValue || null }),
       });
       if (!res.ok) return;
-      const updated = await res.json();
+      const updated = await safeParseJson(res);
+      if (!updated) return;
       onRoomMetaChange(updated);
       // When assigning to an agent, sync that agent's workflow config to the server so auto-reply works with no extra clicks
       if (usernameOrAgentValue && String(usernameOrAgentValue).startsWith("agent:")) {
@@ -1132,6 +1135,7 @@
             <button type="button" class="assign-dropdown-item" role="menuitem" disabled={assignInProgress} onclick={() => assignToAgent('sales-engineer')}>Sales Engineer</button>
             <button type="button" class="assign-dropdown-item" role="menuitem" disabled={assignInProgress} onclick={() => assignToAgent('marketing-engineer')}>Marketing Engineer</button>
             <button type="button" class="assign-dropdown-item" role="menuitem" disabled={assignInProgress} onclick={() => assignToAgent('receptionist')}>Receptionist</button>
+            <button type="button" class="assign-dropdown-item" role="menuitem" disabled={assignInProgress} onclick={() => assignToAgent('chat-widget')}>Chat Widget</button>
             <div class="assign-dropdown-divider"></div>
             <div class="assign-dropdown-hint">Assign to a team member (team list coming soon)</div>
           </div>

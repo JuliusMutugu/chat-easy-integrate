@@ -60,7 +60,8 @@
         body: JSON.stringify(body),
       });
 
-      const data = await res.json();
+      const text = await res.text();
+      const data = (text?.trimStart().startsWith("{") ? (() => { try { return JSON.parse(text); } catch { return null; } })() : null) || {};
       if (!res.ok) {
         error = data.error || "Failed to " + mode;
         return;
@@ -106,7 +107,8 @@
         }),
       });
 
-      const data = await res.json();
+      const text = await res.text();
+      const data = (text?.trimStart().startsWith("{") ? (() => { try { return JSON.parse(text); } catch { return null; } })() : null) || {};
       if (!res.ok) {
         error = data.error || "Failed to submit KYC";
         return;

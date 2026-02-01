@@ -59,6 +59,13 @@ import {
   getWidgetConfigByToken,
   getWidgetConfigsForRoom,
   deleteWidgetConfig,
+  createCampaign,
+  getCampaignById,
+  getAllCampaigns,
+  updateCampaign,
+  deleteCampaign,
+  getLeadsForCampaign,
+  getAllLeads,
 } from "./database.js";
 import { sendEmail, validateEmailConfig } from "./channels/email.js";
 import { sendSmsWithConfig, validateSmsConfig } from "./channels/sms.js";
@@ -129,9 +136,6 @@ const clientPublicImages = path.join(__dirname, "client/public/images");
 const imagesDir = fs.existsSync(clientDistImages) ? clientDistImages : clientPublicImages;
 app.use("/images", express.static(imagesDir));
 
-// Serve static files from client build
-app.use(express.static("client/dist"));
-
 // Store active socket connections (for real-time features)
 const activeConnections = new Map(); // socketId -> { roomId, username }
 // Map username -> Set of socketIds (so we can notify room creator even when not in room)
@@ -142,6 +146,7 @@ const AGENT_TEMPLATE_USERNAMES = {
   "sales-engineer": "Sales Agent",
   "marketing-engineer": "Marketing Agent",
   receptionist: "Receptionist",
+  "chat-widget": "Chat Widget",
 };
 const AGENT_USERNAMES_SET = new Set(Object.values(AGENT_TEMPLATE_USERNAMES));
 
@@ -559,12 +564,13 @@ app.get("/api/rooms/:roomId", async (req, res) => {
 app.patch("/api/rooms/:roomId/meta", async (req, res) => {
   try {
     const { roomId } = req.params;
-    const { assignedTo, lifecycleStage, teamName, channelType } = req.body || {};
+    const { assignedTo, lifecycleStage, teamName, channelType, campaignId } = req.body || {};
     const room = await updateRoomMeta(roomId, {
       assignedTo: assignedTo != null ? String(assignedTo).trim() || null : undefined,
       lifecycleStage: lifecycleStage != null ? String(lifecycleStage).trim() || null : undefined,
       teamName: teamName != null ? String(teamName).trim() || null : undefined,
       channelType: channelType != null ? String(channelType).trim() || "chat" : undefined,
+      campaignId: campaignId != null ? String(campaignId).trim() || null : undefined,
     });
     if (!room) return res.status(404).json({ error: "Room not found" });
     res.json(room);
@@ -593,7 +599,7 @@ app.get("/api/rooms/:roomId/messages", async (req, res) => {
 app.post("/api/workflows/:template", requireAuth, async (req, res) => {
   try {
     const { template } = req.params;
-    const valid = ["sales-engineer", "marketing-engineer", "receptionist"];
+    const valid = ["sales-engineer", "marketing-engineer", "receptionist", "chat-widget"];
     if (!valid.includes(template)) {
       return res.status(400).json({ error: "Invalid template." });
     }
@@ -1190,6 +1196,92 @@ app.delete("/api/widget/:id", requireAuth, async (req, res) => {
   }
 });
 
+// Campaigns – gather and manage leads
+app.get("/api/campaigns", requireAuth, async (req, res) => {
+  try {
+    const campaigns = await getAllCampaigns();
+    res.json(campaigns);
+  } catch (err) {
+    console.error("Campaigns list error:", err);
+    res.status(500).json({ error: err.message || "Failed to list campaigns" });
+  }
+});
+
+app.post("/api/campaigns", requireAuth, async (req, res) => {
+  try {
+    const user = await getUserById(req.session.userId);
+    const { name, description, source = "manual" } = req.body;
+    if (!name || typeof name !== "string" || !name.trim()) {
+      return res.status(400).json({ error: "Campaign name is required" });
+    }
+    const campaign = await createCampaign({
+      name: name.trim(),
+      description: description ? String(description).trim() : null,
+      source: source || "manual",
+      createdByUsername: user?.name || null,
+    });
+    res.json(campaign);
+  } catch (err) {
+    console.error("Campaign create error:", err);
+    res.status(500).json({ error: err.message || "Failed to create campaign" });
+  }
+});
+
+app.get("/api/campaigns/:id", requireAuth, async (req, res) => {
+  try {
+    const campaign = await getCampaignById(req.params.id);
+    if (!campaign) return res.status(404).json({ error: "Campaign not found" });
+    res.json(campaign);
+  } catch (err) {
+    console.error("Campaign get error:", err);
+    res.status(500).json({ error: err.message || "Failed to get campaign" });
+  }
+});
+
+app.patch("/api/campaigns/:id", requireAuth, async (req, res) => {
+  try {
+    const { name, description, source, status } = req.body;
+    const campaign = await updateCampaign(req.params.id, { name, description, source, status });
+    if (!campaign) return res.status(404).json({ error: "Campaign not found" });
+    res.json(campaign);
+  } catch (err) {
+    console.error("Campaign update error:", err);
+    res.status(500).json({ error: err.message || "Failed to update campaign" });
+  }
+});
+
+app.delete("/api/campaigns/:id", requireAuth, async (req, res) => {
+  try {
+    await deleteCampaign(req.params.id);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("Campaign delete error:", err);
+    res.status(500).json({ error: err.message || "Failed to delete campaign" });
+  }
+});
+
+app.get("/api/campaigns/:id/leads", requireAuth, async (req, res) => {
+  try {
+    const user = await getUserById(req.session.userId);
+    const { rooms, pending } = await getLeadsForCampaign(req.params.id, user?.name);
+    res.json({ rooms, pending });
+  } catch (err) {
+    console.error("Campaign leads error:", err);
+    res.status(500).json({ error: err.message || "Failed to get leads" });
+  }
+});
+
+app.get("/api/leads", requireAuth, async (req, res) => {
+  try {
+    const user = await getUserById(req.session.userId);
+    const { rooms, pending } = await getAllLeads(user?.name);
+    res.json({ rooms, pending });
+  } catch (err) {
+    console.error("Leads error:", err);
+    res.status(500).json({ error: err.message || "Failed to get leads" });
+  }
+});
+
 // Frontend route handler for invite links
 app.get("/invite/:inviteToken", async (req, res) => {
   try {
@@ -1207,6 +1299,16 @@ app.get("/invite/:inviteToken", async (req, res) => {
     console.error("Error handling invite link:", error);
     res.redirect("/?error=invite-error");
   }
+});
+
+// Serve static files from client build (after API routes so /api/* always hits the API)
+app.use(express.static("client/dist"));
+
+// SPA fallback: serve index.html for client-side routes (dashboard, inbox, etc.)
+app.get("*", (req, res, next) => {
+  const skip = req.path.startsWith("/api") || req.path.startsWith("/sdk") || req.path.startsWith("/uploads") || req.path.startsWith("/images") || req.path.startsWith("/invite") || req.path === "/favicon.ico";
+  if (skip) return next();
+  res.sendFile(path.join(__dirname, "..", "client", "dist", "index.html"));
 });
 
 // Socket.IO Events

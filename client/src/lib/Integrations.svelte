@@ -1,5 +1,5 @@
 <script>
-  import { playClick, playSuccess } from "./theme.js";
+  import { playClick, playSuccess, safeParseJson } from "./theme.js";
 
   export let config = { serverUrl: "http://localhost:3000" };
   export let onBack = () => {};
@@ -22,9 +22,9 @@
 
   async function loadChannelConfig(channel) {
     try {
-      const res = await fetch(`${base()}/api/channels/${channel}`);
+      const res = await fetch(`${base()}/api/channels/${channel}`, { credentials: "include" });
       if (!res.ok) return;
-      const data = await res.json();
+      const data = await safeParseJson(res);
       if (channel === "email") emailConfig = { ...emailConfig, ...(data.config || {}) };
       if (channel === "sms") smsConfig = { ...smsConfig, ...(data.config || {}) };
       if (channel === "whatsapp") whatsappConfig = { ...whatsappConfig, ...(data.config || {}) };
@@ -44,13 +44,14 @@
       const res = await fetch(`${base()}/api/channels/${channel}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify(body),
       });
       if (res.ok) {
         message = "Config saved.";
         playSuccess();
       } else {
-        const d = await res.json().catch(() => ({}));
+        const d = await safeParseJson(res) || {};
         error = d.error || "Failed to save";
       }
     } catch (e) {
@@ -79,9 +80,10 @@
       const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify(body),
       });
-      const data = await res.json().catch(() => ({}));
+      const data = await safeParseJson(res) || {};
       if (res.ok) {
         message = "Test sent.";
         playSuccess();
@@ -100,10 +102,15 @@
     activeChannel = channel;
     message = "";
     error = "";
-    if (channel) await loadChannelConfig(channel);
+    if (channel === "chat-widget") {
+      await loadWidgetRooms();
+    } else if (channel) {
+      await loadChannelConfig(channel);
+    }
   }
 
   const CHANNEL_CATALOG = [
+    { id: "chat-widget", name: "Chat Widget", category: "business", description: "Embed a chat bubble on your website. Visitors chat without signing up. Train it as an AI chatbot.", popular: true },
     { id: "email", name: "Email (SMTP)", category: "email", description: "Use your own SMTP server. Gmail, SendGrid, or self-hosted. No lock-in.", popular: true },
     { id: "sms", name: "SMS", category: "sms", description: "Your gateway. We POST to your URL. Set Gateway URL to send; leave empty for dev.", popular: false },
     { id: "whatsapp", name: "WhatsApp Business", category: "business", description: "Your adapter. Plug Meta WhatsApp Business API or compatible provider.", popular: true },
@@ -113,6 +120,64 @@
 
   let catalogCategory = "all";
   let catalogSearch = "";
+
+  // Chat Widget
+  let widgetRooms = [];
+  let widgetSelectedRoomId = "";
+  let widgetEmbedCode = "";
+  let widgetCreating = false;
+  let widgetCopySuccess = false;
+
+  async function loadWidgetRooms() {
+    try {
+      const res = await fetch(`${base()}/api/rooms?username=${encodeURIComponent(config.username || "")}`, { credentials: "include" });
+      if (res.ok) {
+        const data = await safeParseJson(res);
+        widgetRooms = Array.isArray(data) ? data : [];
+        if (widgetRooms.length > 0 && !widgetSelectedRoomId) {
+          widgetSelectedRoomId = widgetRooms[0].id;
+        }
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
+  async function createWidget() {
+    if (!widgetSelectedRoomId || widgetCreating) return;
+    widgetCreating = true;
+    error = "";
+    message = "";
+    try {
+      const res = await fetch(`${base()}/api/widget/create`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ roomId: widgetSelectedRoomId, allowedOrigins: "*" }),
+      });
+      const data = await safeParseJson(res) || {};
+      if (!res.ok) throw new Error(data.error || "Failed to create widget");
+      widgetEmbedCode = data.embedCode || "";
+      message = "Widget created! Copy the code below and add it to your website.";
+      playSuccess();
+    } catch (e) {
+      error = e.message || "Failed to create widget";
+    } finally {
+      widgetCreating = false;
+    }
+  }
+
+  async function copyWidgetCode() {
+    if (!widgetEmbedCode) return;
+    try {
+      await navigator.clipboard.writeText(widgetEmbedCode);
+      widgetCopySuccess = true;
+      playSuccess();
+      setTimeout(() => (widgetCopySuccess = false), 2000);
+    } catch (_) {
+      error = "Could not copy. Select and copy manually.";
+    }
+  }
 
   $: catalogFiltered = CHANNEL_CATALOG.filter((ch) => {
     const matchCat = catalogCategory === "all" || ch.category === catalogCategory;
@@ -150,6 +215,8 @@
             <div class="catalog-card-icon" data-channel={ch.id}>
               {#if ch.id === "email"}
                 <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+              {:else if ch.id === "chat-widget"}
+                <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
               {:else if ch.id === "sms"}
                 <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
               {:else if ch.id === "whatsapp"}
@@ -178,6 +245,7 @@
       <h3 class="config-heading">Configure: {CHANNEL_CATALOG.find(c => c.id === activeChannel)?.name ?? activeChannel}</h3>
     {/if}
     <div class="channel-tabs">
+      <button type="button" class="tab" class:active={activeChannel === "chat-widget"} onclick={() => setActive("chat-widget")}>Chat Widget</button>
       <button type="button" class="tab" class:active={activeChannel === "email"} onclick={() => setActive("email")}>Email (SMTP)</button>
       <button type="button" class="tab" class:active={activeChannel === "sms"} onclick={() => setActive("sms")}>SMS</button>
       <button type="button" class="tab" class:active={activeChannel === "whatsapp"} onclick={() => setActive("whatsapp")}>WhatsApp</button>
@@ -185,7 +253,59 @@
       <button type="button" class="tab" class:active={activeChannel === "payments"} onclick={() => setActive("payments")}>Payments</button>
     </div>
 
-    {#if activeChannel === "email"}
+    {#if activeChannel === "chat-widget"}
+      <section class="channel-panel channel-panel-widget">
+        <h3>Chat Widget</h3>
+        <p class="channel-desc">Add a chat bubble to your website. Visitors can chat without signing up. No coding needed—copy, paste, done.</p>
+
+        <div class="widget-guide-section">
+          <h4 class="widget-guide-title">Step 1: Choose a room</h4>
+          <p class="widget-guide-text">Select the room where widget visitors will chat. You can reply as a human, or train an AI to reply automatically.</p>
+          <label class="widget-select-label" for="widget-room-select">Room</label>
+          <select id="widget-room-select" class="widget-select" bind:value={widgetSelectedRoomId} disabled={!widgetRooms.length}>
+            <option value="">{widgetRooms.length ? "Select a room..." : "No rooms yet. Create a room first."}</option>
+            {#each widgetRooms as room (room.id)}
+              <option value={room.id}>{room.name}</option>
+            {/each}
+          </select>
+        </div>
+
+        <div class="widget-guide-section">
+          <h4 class="widget-guide-title">Step 2: Generate embed code</h4>
+          <p class="widget-guide-text">Click the button below to create your unique embed code.</p>
+          <button type="button" class="btn-save" disabled={!widgetSelectedRoomId || widgetCreating} onclick={createWidget}>
+            {widgetCreating ? "Creating…" : "Generate embed code"}
+          </button>
+        </div>
+
+        {#if widgetEmbedCode}
+          <div class="widget-guide-section">
+            <h4 class="widget-guide-title">Step 3: Add to your website</h4>
+            <p class="widget-guide-text">Copy the code below. Paste it into your website's HTML, just before the <code>&lt;/body&gt;</code> tag. That's it.</p>
+            <div class="widget-embed-wrap">
+              <textarea class="widget-embed-code" readonly rows="4">{widgetEmbedCode}</textarea>
+              <button type="button" class="btn-copy-widget" class:copied={widgetCopySuccess} onclick={copyWidgetCode}>
+                {widgetCopySuccess ? "Copied!" : "Copy code"}
+              </button>
+            </div>
+            <p class="widget-hint">Works with any website: WordPress, Wix, Squarespace, or custom HTML. If you use a page builder, add a "Custom HTML" or "Embed" block and paste the code there.</p>
+          </div>
+        {/if}
+
+        <div class="widget-guide-section widget-train-section">
+          <h4 class="widget-guide-title">Train your chatbot (optional)</h4>
+          <p class="widget-guide-text">Want the widget to reply automatically with AI? Train it using the Chat Widget workflow:</p>
+          <ol class="widget-train-steps">
+            <li>Go to <strong>Workflows</strong> and choose <strong>Chat Widget</strong> (dedicated workflow for the embeddable widget)</li>
+            <li>Fill in <strong>Product</strong>, <strong>KPIs</strong>, and <strong>Instructions</strong>—what your chatbot should know and how it should reply</li>
+            <li>Save the workflow</li>
+            <li>Open your room, click <strong>Assign</strong>, and assign it to <strong>Chat Widget</strong></li>
+            <li>Visitors will now get instant AI replies instead of waiting for a human</li>
+          </ol>
+          <p class="widget-hint">Without training, visitors chat with humans in the room. With training, they get instant AI responses 24/7.</p>
+        </div>
+      </section>
+    {:else if activeChannel === "email"}
       <section class="channel-panel">
         <h3>Email (SMTP)</h3>
         <p class="channel-desc">Use your own SMTP server (Gmail, SendGrid, or self-hosted). No third-party lock-in.</p>
@@ -441,6 +561,7 @@
   }
 
   .catalog-card-icon[data-channel="email"] { color: var(--navy-700); }
+  .catalog-card-icon[data-channel="chat-widget"] { color: var(--green-700); }
   .catalog-card-icon[data-channel="sms"] { color: var(--green-700); }
   .catalog-card-icon[data-channel="whatsapp"] { color: #25D366; }
   .catalog-card-icon[data-channel="identity"],
@@ -575,6 +696,121 @@
     padding: 0.1rem 0.35rem;
     border-radius: 4px;
     font-size: 0.8125rem;
+  }
+
+  /* Chat Widget panel */
+  .channel-panel-widget .channel-desc {
+    margin-bottom: 1.5rem;
+  }
+
+  .widget-guide-section {
+    margin-bottom: 1.75rem;
+    padding-bottom: 1.5rem;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .widget-guide-section:last-child {
+    border-bottom: none;
+  }
+
+  .widget-guide-title {
+    margin: 0 0 0.5rem;
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--navy-900);
+  }
+
+  .widget-guide-text {
+    margin: 0 0 0.75rem;
+    font-size: 0.9375rem;
+    color: var(--gray-600);
+    line-height: 1.5;
+  }
+
+  .widget-select-label {
+    display: block;
+    margin-bottom: 0.5rem;
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--gray-700);
+  }
+
+  .widget-select {
+    width: 100%;
+    max-width: 400px;
+    padding: 0.625rem 0.875rem;
+    font-size: 0.9375rem;
+    font-family: inherit;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--card-bg);
+    color: var(--text-primary);
+  }
+
+  .widget-embed-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  .widget-embed-code {
+    width: 100%;
+    padding: 0.75rem 1rem;
+    font-size: 0.75rem;
+    font-family: monospace;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--gray-50);
+    resize: vertical;
+    min-height: 5rem;
+  }
+
+  .btn-copy-widget {
+    align-self: flex-start;
+    padding: 0.5rem 1rem;
+    font-size: 0.875rem;
+    font-weight: 600;
+    font-family: inherit;
+    background: var(--green-600);
+    color: var(--white);
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+  }
+
+  .btn-copy-widget:hover {
+    background: var(--green-700);
+  }
+
+  .btn-copy-widget.copied {
+    background: var(--gray-600);
+  }
+
+  .widget-hint {
+    margin: 0.75rem 0 0;
+    font-size: 0.8125rem;
+    color: var(--gray-500);
+    line-height: 1.5;
+  }
+
+  .widget-train-section {
+    background: var(--gray-50);
+    padding: 1rem 1.25rem;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+  }
+
+  .widget-train-steps {
+    margin: 0.5rem 0 0.75rem;
+    padding-left: 1.5rem;
+    font-size: 0.9375rem;
+    color: var(--gray-700);
+    line-height: 1.6;
+  }
+
+  .widget-train-steps li {
+    margin-bottom: 0.5rem;
   }
 
   .form label {

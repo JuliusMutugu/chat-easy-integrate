@@ -1,5 +1,6 @@
 <script>
   import { onMount, onDestroy } from "svelte";
+  import { safeParseJson } from "./theme.js";
   /**
    * Deal Block – Live offer with Svelte 5 runes.
    * $state: price, qty, sla (user-editable).
@@ -48,7 +49,10 @@
       const res = await fetch(`${config.serverUrl}/api/rooms/${roomId}/deal-events`, {
         credentials: "include",
       });
-      if (res.ok) dealEvents = await res.json();
+      if (res.ok) {
+        const d = await safeParseJson(res);
+        dealEvents = Array.isArray(d) ? d : [];
+      }
     } catch (_) {}
   }
 

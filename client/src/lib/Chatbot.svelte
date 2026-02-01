@@ -29,7 +29,8 @@
         body: JSON.stringify({ message: text, history }),
       });
 
-      const data = await res.json();
+      const text = await res.text();
+      const data = (text?.trimStart().startsWith("{") ? (() => { try { return JSON.parse(text); } catch { return null; } })() : null) || {};
       if (!res.ok) {
         error = data.error || "Failed to get response";
         messages = messages.slice(0, -1);

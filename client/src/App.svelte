@@ -2,7 +2,7 @@
   import { onMount } from "svelte";
   import MessagingModule from "./lib/MessagingModule.svelte";
   import Auth from "./lib/Auth.svelte";
-  import { toggleTheme, getTheme, playClick, playSuccess, playOpen } from "./lib/theme.js";
+  import { toggleTheme, getTheme, playClick, playSuccess, playOpen, safeParseJson } from "./lib/theme.js";
 
   let showModule = false;
   let user = null;
@@ -20,7 +20,7 @@
     syncShowModuleFromUrl();
   }
   let config = {
-    serverUrl: import.meta.env.VITE_SERVER_URL || "http://localhost:3000",
+    serverUrl: import.meta.env.VITE_SERVER_URL || (typeof window !== "undefined" ? window.location.origin : "http://localhost:3000"),
     username: "User" + Math.floor(Math.random() * 1000),
     theme: "modern",
   };
@@ -31,9 +31,12 @@
         credentials: "include",
       });
       if (res.ok) {
-        const data = await res.json();
-        user = data.user;
-        config.username = data.user.name;
+        const text = await res.text();
+        const data = text?.trimStart().startsWith("{") ? (() => { try { return JSON.parse(text); } catch { return null; } })() : null;
+        if (data?.user) {
+          user = data.user;
+          config.username = data.user.name;
+        }
       }
     } catch (err) {
       console.error("Auth check failed:", err);
@@ -210,10 +213,16 @@
   async function handleInviteToken(token) {
     try {
       const response = await fetch(
-        `${config.serverUrl}/api/rooms/invite/${token}`
+        `${config.serverUrl}/api/rooms/invite/${token}`,
+        { credentials: "include" }
       );
       if (response.ok) {
-        inviteRoom = await response.json();
+        const data = await safeParseJson(response);
+        if (!data) {
+          alert("Invalid response from server. Is the backend running?");
+          return;
+        }
+        inviteRoom = data;
         inviteToken = token;
         await checkAuth(); // Check auth before entering app
         showModule = true;
@@ -228,9 +237,14 @@
 
   async function handleInviteLink(roomId) {
     try {
-      const response = await fetch(`${config.serverUrl}/api/rooms/${roomId}`);
+      const response = await fetch(`${config.serverUrl}/api/rooms/${roomId}`, { credentials: "include" });
       if (response.ok) {
-        inviteRoom = await response.json();
+        const data = await safeParseJson(response);
+        if (!data) {
+          alert("Invalid response from server. Is the backend running?");
+          return;
+        }
+        inviteRoom = data;
         await checkAuth(); // Check auth before entering app
         showModule = true;
         window.history.replaceState({}, document.title, "/dashboard");
@@ -280,10 +294,15 @@
         return;
       }
       const response = await fetch(
-        `${config.serverUrl}/api/rooms/code/${roomCode}`
+        `${config.serverUrl}/api/rooms/code/${roomCode}`,
+        { credentials: "include" }
       );
       if (response.ok) {
-        const room = await response.json();
+        const room = await safeParseJson(response);
+        if (!room) {
+          alert("Invalid response from server. Is the backend running?");
+          return;
+        }
         inviteRoom = room;
         await checkAuth(); // Check auth before entering app
         showModule = true;

@@ -165,6 +165,23 @@ export async function initDatabase() {
       `);
     }
 
+    // Migration: add is_customer, is_business, kyc_status to users if missing
+    const usersExists = await db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='users'");
+    if (usersExists) {
+      const usersCols = await db.all("PRAGMA table_info(users)");
+      const usersColNames = (usersCols || []).map((c) => c.name);
+      const userAddCols = [
+        { name: "is_customer", type: "INTEGER DEFAULT 0" },
+        { name: "is_business", type: "INTEGER DEFAULT 0" },
+        { name: "kyc_status", type: "TEXT DEFAULT 'none'" },
+      ];
+      for (const { name, type } of userAddCols) {
+        if (!usersColNames.includes(name)) {
+          await db.run(`ALTER TABLE users ADD COLUMN ${name} ${type}`);
+        }
+      }
+    }
+
     const roomMemberRolesExists = await db.get(
       "SELECT name FROM sqlite_master WHERE type='table' AND name='room_member_roles'"
     );
@@ -193,6 +210,7 @@ export async function initDatabase() {
       { name: "last_message_at", type: "DATETIME" },
       { name: "last_message_from_username", type: "TEXT" },
       { name: "last_message_preview", type: "TEXT" },
+      { name: "campaign_id", type: "TEXT" },
     ];
     for (const { name, type } of inboxCols) {
       if (!colNames.includes(name)) {
@@ -254,6 +272,17 @@ export async function initDatabase() {
       );
       CREATE INDEX IF NOT EXISTS idx_widget_token ON widget_config (token);
       CREATE INDEX IF NOT EXISTS idx_widget_room ON widget_config (room_id);
+
+      CREATE TABLE IF NOT EXISTS campaigns (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        description TEXT,
+        source TEXT DEFAULT 'manual',
+        status TEXT DEFAULT 'active',
+        created_by_username TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_campaigns_status ON campaigns (status);
     `);
 
     console.log("✅ Database initialized successfully");
@@ -372,6 +401,7 @@ export async function getRoomById(roomId) {
     lastMessageAt: room.last_message_at ? new Date(room.last_message_at) : null,
     lastMessageFromUsername: room.last_message_from_username ?? null,
     lastMessagePreview: room.last_message_preview ?? null,
+    campaignId: room.campaign_id ?? null,
   };
 }
 
@@ -417,6 +447,7 @@ async function roomsWithCounts(roomRows) {
         lastMessageAt: room.last_message_at ? new Date(room.last_message_at) : null,
         lastMessageFromUsername: room.last_message_from_username ?? null,
         lastMessagePreview: room.last_message_preview ?? null,
+        campaignId: room.campaign_id ?? null,
       };
     })
   );
@@ -599,8 +630,8 @@ export async function saveMessage(roomId, username, message, replyToMessageId = 
   };
 }
 
-/** Update room inbox meta (assigned to, lifecycle, team, channel type). */
-export async function updateRoomMeta(roomId, { assignedTo, lifecycleStage, teamName, channelType }) {
+/** Update room inbox meta (assigned to, lifecycle, team, channel type, campaign). */
+export async function updateRoomMeta(roomId, { assignedTo, lifecycleStage, teamName, channelType, campaignId }) {
   const room = await db.get("SELECT id FROM rooms WHERE id = ?", [roomId]);
   if (!room) return null;
 
@@ -622,14 +653,18 @@ export async function updateRoomMeta(roomId, { assignedTo, lifecycleStage, teamN
     updates.push("channel_type = ?");
     values.push(channelType === "" || channelType == null ? "chat" : channelType);
   }
+  if (campaignId !== undefined) {
+    updates.push("campaign_id = ?");
+    values.push(campaignId === "" || campaignId == null ? null : campaignId);
+  }
   if (updates.length === 0) return getRoomById(roomId);
   values.push(roomId);
   await db.run(`UPDATE rooms SET ${updates.join(", ")} WHERE id = ?`, values);
   return getRoomById(roomId);
 }
 
-/** Workflow config (agent templates: sales-engineer, marketing-engineer, receptionist). */
-const WORKFLOW_TEMPLATES = ["sales-engineer", "marketing-engineer", "receptionist"];
+/** Workflow config (agent templates: sales-engineer, marketing-engineer, receptionist, chat-widget). */
+const WORKFLOW_TEMPLATES = ["sales-engineer", "marketing-engineer", "receptionist", "chat-widget"];
 
 export async function getWorkflowConfig(template) {
   if (!WORKFLOW_TEMPLATES.includes(template)) return null;
@@ -810,6 +845,116 @@ export async function getWidgetConfigsForRoom(roomId) {
 
 export async function deleteWidgetConfig(id) {
   await db.run("DELETE FROM widget_config WHERE id = ?", [id]);
+}
+
+/** Campaigns – gather and manage leads */
+function generateCampaignId() {
+  return "camp-" + Date.now() + "-" + Math.random().toString(36).slice(2, 9);
+}
+
+export async function createCampaign({ name, description, source = "manual", createdByUsername }) {
+  const id = generateCampaignId();
+  await db.run(
+    "INSERT INTO campaigns (id, name, description, source, status, created_by_username) VALUES (?, ?, ?, ?, 'active', ?)",
+    [id, name, description || null, source, createdByUsername || null]
+  );
+  return getCampaignById(id);
+}
+
+export async function getCampaignById(id) {
+  const row = await db.get("SELECT * FROM campaigns WHERE id = ?", [id]);
+  if (!row) return null;
+  return {
+    id: row.id,
+    name: row.name,
+    description: row.description,
+    source: row.source || "manual",
+    status: row.status || "active",
+    createdByUsername: row.created_by_username,
+    createdAt: row.created_at ? new Date(row.created_at) : null,
+  };
+}
+
+export async function getAllCampaigns() {
+  const rows = await db.all("SELECT * FROM campaigns ORDER BY created_at DESC");
+  return rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    description: r.description,
+    source: r.source || "manual",
+    status: r.status || "active",
+    createdByUsername: r.created_by_username,
+    createdAt: r.created_at ? new Date(r.created_at) : null,
+  }));
+}
+
+export async function updateCampaign(id, { name, description, source, status }) {
+  const existing = await db.get("SELECT id FROM campaigns WHERE id = ?", [id]);
+  if (!existing) return null;
+  const updates = [];
+  const values = [];
+  if (name !== undefined) { updates.push("name = ?"); values.push(name); }
+  if (description !== undefined) { updates.push("description = ?"); values.push(description); }
+  if (source !== undefined) { updates.push("source = ?"); values.push(source); }
+  if (status !== undefined) { updates.push("status = ?"); values.push(status); }
+  if (updates.length === 0) return getCampaignById(id);
+  values.push(id);
+  await db.run(`UPDATE campaigns SET ${updates.join(", ")} WHERE id = ?`, values);
+  return getCampaignById(id);
+}
+
+export async function deleteCampaign(id) {
+  await db.run("UPDATE rooms SET campaign_id = NULL WHERE campaign_id = ?", [id]);
+  await db.run("DELETE FROM campaigns WHERE id = ?", [id]);
+}
+
+/** Get leads for a campaign: rooms + pending join requests for those rooms */
+export async function getLeadsForCampaign(campaignId, username) {
+  const roomRows = await db.all(
+    "SELECT * FROM rooms WHERE campaign_id = ? ORDER BY created_at DESC, last_message_at DESC",
+    [campaignId]
+  );
+  const rooms = await roomsWithCounts(roomRows);
+  const pending = await db.all(
+    `SELECT p.*, r.name as room_name FROM pending_join_requests p
+     JOIN rooms r ON p.room_id = r.id
+     WHERE r.campaign_id = ? AND p.status = 'pending'
+     ORDER BY p.created_at DESC`,
+    [campaignId]
+  );
+  return {
+    rooms,
+    pending: pending.map((p) => ({
+      requestId: p.id,
+      roomId: p.room_id,
+      roomName: p.room_name,
+      requesterUsername: p.requester_username,
+      createdAt: p.created_at ? new Date(p.created_at) : null,
+    })),
+  };
+}
+
+/** Get all leads (rooms with lifecycle new_lead/hot_lead or any campaign room) – for "All leads" view */
+export async function getAllLeads(username) {
+  const rooms = await getRoomsForUser(username);
+  const pending = await db.all(
+    `SELECT p.*, r.name as room_name FROM pending_join_requests p
+     JOIN rooms r ON p.room_id = r.id
+     WHERE p.status = 'pending'
+     AND (r.created_by_username = ? OR EXISTS (SELECT 1 FROM room_users ru WHERE ru.room_id = r.id AND ru.username = ?))
+     ORDER BY p.created_at DESC`,
+    [username || "", username || ""]
+  );
+  return {
+    rooms: rooms.filter((r) => r.lifecycleStage === "new_lead" || r.lifecycleStage === "hot_lead" || r.campaignId),
+    pending: pending.map((p) => ({
+      requestId: p.id,
+      roomId: p.room_id,
+      roomName: p.room_name,
+      requesterUsername: p.requester_username,
+      createdAt: p.created_at ? new Date(p.created_at) : null,
+    })),
+  };
 }
 
 export async function getRoomMessages(roomId, limit = 50) {
