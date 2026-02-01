@@ -6,6 +6,7 @@
   import CreateRoom from "./CreateRoom.svelte";
   import Settings from "./Settings.svelte";
   import Integrations from "./Integrations.svelte";
+  import Chatbot from "./Chatbot.svelte";
   import { playOpen, getAvatar, getWorkflowConfig, setWorkflowConfig, getAssignedAgentTemplate, getAssignedToDisplay } from "./theme.js";
 
   export let config = {
@@ -1407,6 +1408,7 @@
     </aside>
   </div>
 
+  <Chatbot serverUrl={config.serverUrl} />
   </div>
 
 <style>

@@ -57,7 +57,7 @@ import {
   updateKycStatus,
 } from "./database.js";
 import { sendEmail, validateEmailConfig } from "./channels/email.js";
-import { sendSms, sendSmsDev, validateSmsConfig } from "./channels/sms.js";
+import { sendSmsWithConfig, validateSmsConfig } from "./channels/sms.js";
 import { sendWhatsApp, sendWhatsAppDev, validateWhatsAppConfig } from "./channels/whatsapp.js";
 import { GoogleGenAI } from "@google/genai";
 
@@ -170,6 +170,55 @@ async function generateAiReply(apiKey, roomId, workflowContext) {
     reply = String(response.candidates[0].content.parts[0].text).trim();
   }
   if (!reply) throw new Error("AI returned no reply.");
+  return { reply };
+}
+
+/** In-app help chatbot – Gemini, scoped to app activities only */
+const CHATBOT_SYSTEM_PROMPT = `You are a helpful assistant for Nego, a messaging and negotiation app for organizations. You ONLY help users with activities within this application. Stay on topic.
+
+You can help with:
+- **Rooms & Conversations**: Creating rooms, inviting people, joining via code or invite link, room settings
+- **Assignments**: Assigning rooms to team members or AI agents (Sales Agent, Marketing Agent, Receptionist)
+- **Workflows**: Configuring agents with product info, KPIs, instructions; training agents for auto-reply
+- **Negotiations & Deals**: Deal terms (price, quantity, SLA), proposing terms, amending terms, human handover
+- **Inbox**: Pending join requests, accepting/declining requests, lifecycle stages, campaigns
+- **Contacts & Integrations**: Settings, email/SMS/WhatsApp channels, Integrations setup
+- **Account**: Sign up, login, Customer vs Business accounts, KYC for business accounts
+
+Rules:
+- Answer briefly (2–4 sentences). Use bullet points when listing steps.
+- If asked about features outside the app, politely say you can only help with Nego app features.
+- Do not give financial, legal, or medical advice. Do not discuss unrelated topics.`;
+
+async function generateChatbotReply(apiKey, userMessage, conversationHistory = []) {
+  let contextText = "";
+  if (conversationHistory.length > 0) {
+    contextText =
+      "\n\nRecent conversation:\n" +
+      conversationHistory
+        .slice(-8)
+        .map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`)
+        .join("\n") +
+      "\n\nUser: " +
+      userMessage;
+  } else {
+    contextText = "\n\nUser question: " + userMessage;
+  }
+  const fullPrompt = CHATBOT_SYSTEM_PROMPT + contextText + "\n\nAssistant (reply concisely):";
+
+  const ai = new GoogleGenAI({ apiKey });
+  const response = await ai.models.generateContent({
+    model: "gemini-2.0-flash",
+    contents: fullPrompt,
+  });
+
+  let reply = "";
+  if (response?.text) {
+    reply = String(response.text).trim();
+  } else if (response?.candidates?.[0]?.content?.parts?.[0]?.text) {
+    reply = String(response.candidates[0].content.parts[0].text).trim();
+  }
+  if (!reply) throw new Error("Chatbot returned no reply.");
   return { reply };
 }
 
@@ -578,6 +627,29 @@ app.post("/api/ai/reply", requireAuth, async (req, res) => {
   }
 });
 
+// In-app help chatbot – scoped to app activities only
+app.post("/api/chatbot", requireAuth, async (req, res) => {
+  try {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey || !apiKey.trim()) {
+      return res.status(503).json({ error: "AI not configured. Add GEMINI_API_KEY to .env." });
+    }
+    const { message, history = [] } = req.body;
+    if (!message || typeof message !== "string") {
+      return res.status(400).json({ error: "message required" });
+    }
+    const trimmed = message.trim();
+    if (!trimmed) {
+      return res.status(400).json({ error: "message cannot be empty" });
+    }
+    const { reply } = await generateChatbotReply(apiKey, trimmed, Array.isArray(history) ? history : []);
+    res.json({ reply });
+  } catch (error) {
+    console.error("Chatbot error:", error);
+    res.status(500).json({ error: error.message || "Failed to get response" });
+  }
+});
+
 // Fetch URL and return extracted text (for workflow "Add from website")
 app.post("/api/ai/fetch-url", async (req, res) => {
   try {
@@ -942,6 +1014,25 @@ async function getEmailConfig() {
   return merged;
 }
 
+/** SMS config: DB (Integrations) merged with .env AFRICASTALKING_*; env values are quote-stripped. */
+async function getSmsConfig() {
+  const fromDb = (await getChannelConfig("sms"))?.config || {};
+  const envUsername = process.env.AFRICASTALKING_USERNAME;
+  const envApiKey = process.env.AFRICASTALKING_API_KEY;
+  const merged = { ...fromDb };
+  // Africa's Talking from .env (takes precedence when both username and apiKey are set)
+  if (envUsername && envApiKey) {
+    merged.provider = "africastalking";
+    merged.apiKey = stripEnvQuotes(String(envApiKey));
+    merged.sandbox = process.env.AFRICASTALKING_SANDBOX !== "false" && process.env.AFRICASTALKING_SANDBOX !== "0";
+    // Sandbox requires username "sandbox"; live uses your app username
+    merged.username = merged.sandbox ? "sandbox" : stripEnvQuotes(String(envUsername));
+    const senderId = process.env.AFRICASTALKING_SENDER_ID;
+    if (senderId) merged.senderId = stripEnvQuotes(String(senderId));
+  }
+  return merged;
+}
+
 const CHANNEL_NAMES = ["email", "sms", "whatsapp", "identity", "payments"];
 
 app.get("/api/channels/:channel", async (req, res) => {
@@ -994,11 +1085,16 @@ app.post("/api/channels/sms/send", async (req, res) => {
   try {
     const { to, body } = req.body || {};
     if (!to) return res.status(400).json({ error: "to is required" });
-    const { config } = (await getChannelConfig("sms")) || {};
-    const sendFn = config && config.gatewayUrl ? sendSms : sendSmsDev;
-    const result = await sendFn(config || {}, { to, body });
-    await saveOutboundMessage("sms", String(to), body || "", "sent", result.externalId);
-    res.json({ success: true, externalId: result.externalId });
+    const config = await getSmsConfig();
+    const valid = validateSmsConfig(config);
+    if (!valid.valid) {
+      return res.status(400).json({ error: valid.error || "SMS not configured. Add AFRICASTALKING_USERNAME and AFRICASTALKING_API_KEY to .env" });
+    }
+    const result = await sendSmsWithConfig(config, { to, body });
+    await saveOutboundMessage("sms", Array.isArray(to) ? to.join(",") : String(to), body || "", "sent", result.externalId);
+    const json = { success: true, externalId: result.externalId };
+    if (result.recipientStatus) json.recipientStatus = result.recipientStatus;
+    res.json(json);
   } catch (err) {
     console.error("Error sending SMS:", err);
     res.status(500).json({ error: err.message || "Failed to send SMS" });
