@@ -2026,20 +2026,21 @@ const PORT = process.env.PORT || 3000;
 // Handle port in use error
 server
   .listen(PORT, () => {
-    console.log(
-      `🚀 Messaging platform server running on http://localhost:${PORT}`
-    );
+    const displayUrl = process.env.SERVER_URL || `http://localhost:${PORT}`;
+    console.log(`🚀 Messaging platform server running on ${displayUrl}`);
+    if (process.env.NODE_ENV === 'production') {
+      console.log(`📍 Public URL: ${displayUrl}`);
+    } else {
+      console.log(`📍 Local development mode`);
+    }
   })
   .on("error", (err) => {
     if (err.code === "EADDRINUSE") {
       console.log(`❌ Port ${PORT} is in use, trying port ${PORT + 1}...`);
       server
         .listen(PORT + 1, () => {
-          console.log(
-            `🚀 Messaging platform server running on http://localhost:${
-              PORT + 1
-            }`
-          );
+          const displayUrl = process.env.SERVER_URL || `http://localhost:${PORT + 1}`;
+          console.log(`🚀 Messaging platform server running on ${displayUrl}`);
         })
         .on("error", (err2) => {
           if (err2.code === "EADDRINUSE") {
@@ -2047,11 +2048,8 @@ server
               `❌ Port ${PORT + 1} is also in use, trying port ${PORT + 2}...`
             );
             server.listen(PORT + 2, () => {
-              console.log(
-                `🚀 Messaging platform server running on http://localhost:${
-                  PORT + 2
-                }`
-              );
+              const displayUrl = process.env.SERVER_URL || `http://localhost:${PORT + 2}`;
+              console.log(`🚀 Messaging platform server running on ${displayUrl}`);
             });
           }
         });
