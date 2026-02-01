@@ -99,7 +99,8 @@ const sessionMiddleware = session({
     secure: process.env.NODE_ENV === "production",
     httpOnly: true,
     maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-    sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+    sameSite: process.env.NODE_ENV === "production" ? "lax" : "lax", // Changed to 'lax' for same-origin
+    domain: process.env.NODE_ENV === "production" ? ".onrender.com" : undefined,
   },
 });
 
