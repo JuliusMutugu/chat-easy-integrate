@@ -199,6 +199,18 @@ export async function initDatabase() {
       }
     }
 
+    await db.exec(`
+      CREATE TABLE IF NOT EXISTS workflow_config (
+        template TEXT PRIMARY KEY,
+        product TEXT,
+        kpis TEXT,
+        instructions TEXT,
+        website_text TEXT,
+        document_text TEXT,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
     console.log("✅ Database initialized successfully");
     return db;
   } catch (error) {
@@ -569,6 +581,45 @@ export async function updateRoomMeta(roomId, { assignedTo, lifecycleStage, teamN
   values.push(roomId);
   await db.run(`UPDATE rooms SET ${updates.join(", ")} WHERE id = ?`, values);
   return getRoomById(roomId);
+}
+
+/** Workflow config (agent templates: sales-engineer, marketing-engineer, receptionist). */
+const WORKFLOW_TEMPLATES = ["sales-engineer", "marketing-engineer", "receptionist"];
+
+export async function getWorkflowConfig(template) {
+  if (!WORKFLOW_TEMPLATES.includes(template)) return null;
+  const row = await db.get("SELECT * FROM workflow_config WHERE template = ?", [template]);
+  if (!row) return null;
+  return {
+    product: row.product ?? "",
+    kpis: row.kpis ?? "",
+    instructions: row.instructions ?? "",
+    websiteText: row.website_text ?? "",
+    documentText: row.document_text ?? "",
+    updatedAt: row.updated_at ? new Date(row.updated_at) : null,
+  };
+}
+
+export async function setWorkflowConfig(template, data) {
+  if (!WORKFLOW_TEMPLATES.includes(template)) return null;
+  const product = (data?.product ?? "").trim();
+  const kpis = (data?.kpis ?? "").trim();
+  const instructions = (data?.instructions ?? "").trim();
+  const websiteText = (data?.websiteText ?? "").trim();
+  const documentText = (data?.documentText ?? "").trim();
+  await db.run(
+    `INSERT INTO workflow_config (template, product, kpis, instructions, website_text, document_text, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+     ON CONFLICT(template) DO UPDATE SET
+       product = excluded.product,
+       kpis = excluded.kpis,
+       instructions = excluded.instructions,
+       website_text = excluded.website_text,
+       document_text = excluded.document_text,
+       updated_at = CURRENT_TIMESTAMP`,
+    [template, product, kpis, instructions, websiteText, documentText]
+  );
+  return getWorkflowConfig(template);
 }
 
 export async function getRoomMessages(roomId, limit = 50) {

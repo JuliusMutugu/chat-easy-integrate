@@ -1,6 +1,6 @@
 <script>
   import { onMount, onDestroy } from "svelte";
-  import { playClick, playSuccess, getEnterToSend, getCustomSnippets, getAvatar } from "./theme.js";
+  import { playClick, playSuccess, getEnterToSend, getCustomSnippets, getAvatar, agentAssignValue, getAssignedToDisplay, getWorkflowConfig } from "./theme.js";
   import DealPanel from "./DealPanel.svelte";
   import Calculator from "./Calculator.svelte";
 
@@ -160,7 +160,7 @@
     }
   }
 
-  async function assignTo(username) {
+  async function assignTo(usernameOrAgentValue) {
     if (assignInProgress || !config.serverUrl || !room.id) return;
     assignInProgress = true;
     showAssignPanel = false;
@@ -168,18 +168,44 @@
       const res = await fetch(`${config.serverUrl}/api/rooms/${room.id}/meta`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ assignedTo: username || null }),
+        body: JSON.stringify({ assignedTo: usernameOrAgentValue || null }),
       });
       if (!res.ok) return;
       const updated = await res.json();
       onRoomMetaChange(updated);
+      // When assigning to an agent, sync that agent's workflow config to the server so auto-reply works with no extra clicks
+      if (usernameOrAgentValue && String(usernameOrAgentValue).startsWith("agent:")) {
+        const template = String(usernameOrAgentValue).slice(6).trim();
+        const workflow = getWorkflowConfig(template);
+        if (workflow) {
+          try {
+            await fetch(`${config.serverUrl}/api/workflows/${template}`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                product: workflow.product ?? "",
+                kpis: workflow.kpis ?? "",
+                instructions: workflow.instructions ?? "",
+                websiteText: workflow.websiteText ?? "",
+                documentText: workflow.documentText ?? "",
+              }),
+            });
+          } catch (_) {}
+        }
+      }
       playSuccess();
-      showToast(username ? "Assigned to " + username + "." : "Unassigned.");
+      const label = usernameOrAgentValue ? getAssignedToDisplay(usernameOrAgentValue) : null;
+      showToast(label ? "Assigned to " + label + ". The agent will reply automatically to new messages." : "Unassigned.");
     } catch (_) {
       showToast("Failed to update assignment.");
     } finally {
       assignInProgress = false;
     }
+  }
+
+  function assignToAgent(templateKey) {
+    const value = agentAssignValue(templateKey);
+    if (value) assignTo(value);
   }
 
   function copySimpleMessage() {
@@ -1017,11 +1043,19 @@
         <button type="button" class="btn-invite-header" onclick={openInvitePanel} title="Invite" aria-label="Invite to room">Invite</button>
       {/if}
       <div class="header-assign-wrap">
+        {#if room.assignedTo && room.assignedTo.startsWith && room.assignedTo.startsWith('agent:')}
+          <span class="header-assigned-agent-badge" title="Assigned to agent">{getAssignedToDisplay(room.assignedTo)}</span>
+        {/if}
         <button type="button" class="btn-assign-header" onclick={() => (showAssignPanel = !showAssignPanel)} title="Assign conversation" aria-expanded={showAssignPanel} aria-haspopup="true" aria-label="Assign to someone">Assign</button>
         {#if showAssignPanel}
           <div class="assign-dropdown" role="menu">
             <button type="button" class="assign-dropdown-item" role="menuitem" disabled={assignInProgress} onclick={() => assignTo(config.username)}>Assign to me</button>
             <button type="button" class="assign-dropdown-item" role="menuitem" disabled={assignInProgress} onclick={() => assignTo(null)}>Unassign</button>
+            <div class="assign-dropdown-divider"></div>
+            <div class="assign-dropdown-label">Assign to agent</div>
+            <button type="button" class="assign-dropdown-item" role="menuitem" disabled={assignInProgress} onclick={() => assignToAgent('sales-engineer')}>Sales Engineer</button>
+            <button type="button" class="assign-dropdown-item" role="menuitem" disabled={assignInProgress} onclick={() => assignToAgent('marketing-engineer')}>Marketing Engineer</button>
+            <button type="button" class="assign-dropdown-item" role="menuitem" disabled={assignInProgress} onclick={() => assignToAgent('receptionist')}>Receptionist</button>
             <div class="assign-dropdown-divider"></div>
             <div class="assign-dropdown-hint">Assign to a team member (team list coming soon)</div>
           </div>
@@ -1674,7 +1708,8 @@
     overflow-y: auto;
     overflow-x: hidden;
     padding: 1.25rem;
-    padding-bottom: 6rem;
+    /* Enough bottom padding so last message stays visible above fixed input bar */
+    padding-bottom: 8rem;
     display: flex;
     flex-direction: column;
     gap: 1rem;
@@ -1878,6 +1913,15 @@
 
   .header-assign-wrap {
     position: relative;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .header-assigned-agent-badge {
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: var(--text-secondary);
   }
 
   .btn-assign-header {
@@ -1941,6 +1985,16 @@
     height: 1px;
     background: var(--border);
     margin: 0.35rem 0;
+  }
+
+  .assign-dropdown-label {
+    padding: 0.35rem 0.75rem 0.15rem;
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--text-secondary);
+    line-height: 1.3;
   }
 
   .assign-dropdown-hint {
@@ -3564,6 +3618,7 @@
 
     .messages-scroll {
       padding: 1rem;
+      padding-bottom: 8rem;
     }
 
     .input-area {

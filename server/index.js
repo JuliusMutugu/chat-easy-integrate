@@ -37,6 +37,8 @@ import {
   getPendingJoinRequestsForCreator,
   saveMessage,
   getRoomMessages,
+  getWorkflowConfig,
+  setWorkflowConfig,
   getChannelConfig,
   setChannelConfig,
   saveOutboundMessage,
@@ -94,6 +96,52 @@ app.use(express.static("client/dist"));
 const activeConnections = new Map(); // socketId -> { roomId, username }
 // Map username -> Set of socketIds (so we can notify room creator even when not in room)
 const usernameToSockets = new Map();
+
+// Agent template -> display username (for auto-reply messages)
+const AGENT_TEMPLATE_USERNAMES = {
+  "sales-engineer": "Sales Agent",
+  "marketing-engineer": "Marketing Agent",
+  receptionist: "Receptionist",
+};
+const AGENT_USERNAMES_SET = new Set(Object.values(AGENT_TEMPLATE_USERNAMES));
+
+/** Generate AI reply for a room using Gemini. Returns { reply } or throws. */
+async function generateAiReply(apiKey, roomId, workflowContext) {
+  const messages = await getRoomMessages(roomId, 25);
+  const convoText = messages
+    .filter((m) => m.message && String(m.message).trim())
+    .map((m) => `${m.username}: ${String(m.message).trim()}`)
+    .join("\n");
+  const product = workflowContext?.product?.trim() || "";
+  const kpis = workflowContext?.kpis?.trim() || "";
+  const instructions = workflowContext?.instructions?.trim() || "";
+  let systemPrompt =
+    "You are a helpful agent replying in a conversation. Reply in 1–3 short sentences. Be professional and relevant to the last message.";
+  if (product || kpis || instructions) {
+    const parts = [];
+    if (product) parts.push(`Product/service: ${product}`);
+    if (kpis) parts.push(`KPIs/goals: ${kpis}`);
+    if (instructions) parts.push(`Agent instructions: ${instructions}`);
+    systemPrompt =
+      "You are an agent trained for this workflow. Follow these guidelines:\n" +
+      parts.join("\n") +
+      "\n\nReply in 1–3 short sentences. Be professional and relevant to the last message.";
+  }
+  const fullPrompt = `${systemPrompt}\n\nRecent conversation:\n${convoText || "(no messages yet)"}\n\nGenerate only the agent reply (no prefix, no quotes):`;
+  const ai = new GoogleGenAI({ apiKey });
+  const response = await ai.models.generateContent({
+    model: "gemini-2.0-flash",
+    contents: fullPrompt,
+  });
+  let reply = "";
+  if (response?.text) {
+    reply = String(response.text).trim();
+  } else if (response?.candidates?.[0]?.content?.parts?.[0]?.text) {
+    reply = String(response.candidates[0].content.parts[0].text).trim();
+  }
+  if (!reply) throw new Error("AI returned no reply.");
+  return { reply };
+}
 
 // API Routes
 app.get("/api/health", (req, res) => {
@@ -285,6 +333,29 @@ app.get("/api/rooms/:roomId/messages", async (req, res) => {
   }
 });
 
+// Save workflow config (synced from client when user clicks "Save and use this agent")
+app.post("/api/workflows/:template", async (req, res) => {
+  try {
+    const { template } = req.params;
+    const valid = ["sales-engineer", "marketing-engineer", "receptionist"];
+    if (!valid.includes(template)) {
+      return res.status(400).json({ error: "Invalid template." });
+    }
+    const { product, kpis, instructions, websiteText, documentText } = req.body || {};
+    await setWorkflowConfig(template, {
+      product: product ?? "",
+      kpis: kpis ?? "",
+      instructions: instructions ?? "",
+      websiteText: websiteText ?? "",
+      documentText: documentText ?? "",
+    });
+    res.json({ ok: true });
+  } catch (error) {
+    console.error("Error saving workflow config:", error);
+    res.status(500).json({ error: error.message || "Failed to save workflow." });
+  }
+});
+
 // AI reply: use Gemini (key from .env) to generate a reply from recent conversation + optional workflow context
 app.post("/api/ai/reply", async (req, res) => {
   try {
@@ -300,41 +371,7 @@ app.post("/api/ai/reply", async (req, res) => {
     if (!room) {
       return res.status(404).json({ error: "Room not found" });
     }
-    const messages = await getRoomMessages(roomId, 25);
-    const convoText = messages
-      .filter((m) => m.message && String(m.message).trim())
-      .map((m) => `${m.username}: ${String(m.message).trim()}`)
-      .join("\n");
-    const product = workflowContext?.product?.trim() || "";
-    const kpis = workflowContext?.kpis?.trim() || "";
-    const instructions = workflowContext?.instructions?.trim() || "";
-    let systemPrompt =
-      "You are a helpful agent replying in a conversation. Reply in 1–3 short sentences. Be professional and relevant to the last message.";
-    if (product || kpis || instructions) {
-      const parts = [];
-      if (product) parts.push(`Product/service: ${product}`);
-      if (kpis) parts.push(`KPIs/goals: ${kpis}`);
-      if (instructions) parts.push(`Agent instructions: ${instructions}`);
-      systemPrompt =
-        "You are an agent trained for this workflow. Follow these guidelines:\n" +
-        parts.join("\n") +
-        "\n\nReply in 1–3 short sentences. Be professional and relevant to the last message.";
-    }
-    const fullPrompt = `${systemPrompt}\n\nRecent conversation:\n${convoText || "(no messages yet)"}\n\nGenerate only the agent reply (no prefix, no quotes):`;
-    const ai = new GoogleGenAI({ apiKey });
-    const response = await ai.models.generateContent({
-      model: "gemini-2.0-flash",
-      contents: fullPrompt,
-    });
-    let reply = "";
-    if (response?.text) {
-      reply = String(response.text).trim();
-    } else if (response?.candidates?.[0]?.content?.parts?.[0]?.text) {
-      reply = String(response.candidates[0].content.parts[0].text).trim();
-    }
-    if (!reply) {
-      return res.status(502).json({ error: "AI returned no reply." });
-    }
+    const { reply } = await generateAiReply(apiKey, roomId, workflowContext || {});
     res.json({ reply });
   } catch (error) {
     console.error("Error generating AI reply:", error);
@@ -1100,6 +1137,47 @@ io.on("connection", (socket) => {
       }
 
       io.to(roomId).emit("new-message", fullMessageData);
+
+      // Auto-reply when room is assigned to an agent: generate AI reply and send as agent message (no button click)
+      (async () => {
+        if (type !== "text") return;
+        const assignedTo = room.assignedTo;
+        if (!assignedTo || typeof assignedTo !== "string" || !assignedTo.startsWith("agent:")) return;
+        if (AGENT_USERNAMES_SET.has(username)) return;
+        const template = assignedTo.slice(6).trim();
+        if (!AGENT_TEMPLATE_USERNAMES[template]) return;
+        const apiKey = process.env.GEMINI_API_KEY;
+        if (!apiKey || !apiKey.trim()) return;
+        try {
+          const workflow = await getWorkflowConfig(template);
+          const agentLabel = AGENT_TEMPLATE_USERNAMES[template];
+          let workflowContext = {};
+          if (workflow && (workflow.product || workflow.kpis || workflow.instructions || workflow.websiteText || workflow.documentText)) {
+            workflowContext = {
+              product: workflow.product || "",
+              kpis: workflow.kpis || "",
+              instructions: [workflow.instructions, workflow.websiteText, workflow.documentText].filter(Boolean).join("\n\n"),
+            };
+          } else {
+            workflowContext = {
+              instructions: `You are a professional ${agentLabel}. Reply helpfully and concisely in 1–3 short sentences. Be relevant to the last message.`,
+            };
+          }
+          const { reply } = await generateAiReply(apiKey, roomId, workflowContext);
+          const agentUsername = agentLabel;
+          const agentMessageData = await saveMessage(roomId, agentUsername, reply, null);
+          const fullAgentMessage = {
+            ...agentMessageData,
+            type: "text",
+            userId: null,
+            replyToMessageId: agentMessageData.replyToMessageId ?? undefined,
+            clientId: undefined,
+          };
+          io.to(roomId).emit("new-message", fullAgentMessage);
+        } catch (err) {
+          console.error("Agent auto-reply failed:", err);
+        }
+      })();
     } catch (error) {
       console.error("Error sending message:", error);
     }

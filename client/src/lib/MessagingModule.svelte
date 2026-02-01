@@ -6,7 +6,7 @@
   import CreateRoom from "./CreateRoom.svelte";
   import Settings from "./Settings.svelte";
   import Integrations from "./Integrations.svelte";
-  import { playOpen, getAvatar, getWorkflowConfig, setWorkflowConfig } from "./theme.js";
+  import { playOpen, getAvatar, getWorkflowConfig, setWorkflowConfig, getAssignedAgentTemplate, getAssignedToDisplay } from "./theme.js";
 
   export let config = {
     serverUrl: "http://localhost:3000",
@@ -543,15 +543,29 @@
     if (!currentRoom?.id || aiReplyLoading) return;
     aiReplyLoading = true;
     let workflowContext = null;
-    for (const t of ["sales-engineer", "marketing-engineer", "receptionist"]) {
-      const c = getWorkflowConfig(t);
+    // Prefer the room's assigned agent workflow (when room is assigned to Sales/Marketing/Receptionist)
+    const assignedTemplate = getAssignedAgentTemplate(currentRoom.assignedTo);
+    if (assignedTemplate) {
+      const c = getWorkflowConfig(assignedTemplate);
       if (c && (c.instructions || c.product || c.kpis || c.websiteText || c.documentText)) {
         workflowContext = {
           product: c.product || "",
           kpis: c.kpis || "",
           instructions: [c.instructions, c.websiteText, c.documentText].filter(Boolean).join("\n\n"),
         };
-        break;
+      }
+    }
+    if (!workflowContext) {
+      for (const t of ["sales-engineer", "marketing-engineer", "receptionist"]) {
+        const c = getWorkflowConfig(t);
+        if (c && (c.instructions || c.product || c.kpis || c.websiteText || c.documentText)) {
+          workflowContext = {
+            product: c.product || "",
+            kpis: c.kpis || "",
+            instructions: [c.instructions, c.websiteText, c.documentText].filter(Boolean).join("\n\n"),
+          };
+          break;
+        }
       }
     }
     try {
@@ -634,16 +648,26 @@
     }
   }
 
-  function saveWorkflowTrain() {
+  async function saveWorkflowTrain() {
     if (!workflowTrainTemplate) return;
-    setWorkflowConfig(workflowTrainTemplate, {
+    const data = {
       product: workflowTrainProduct,
       kpis: workflowTrainKpis,
       instructions: workflowTrainInstructions,
       websiteText: workflowTrainWebsiteText,
       documentText: workflowTrainDocumentText,
-    });
-    addNotification("info", "Agent data saved. Use \"Respond with AI\" in a conversation to use it.", 5000);
+    };
+    setWorkflowConfig(workflowTrainTemplate, data);
+    if (config.serverUrl) {
+      try {
+        await fetch(`${config.serverUrl}/api/workflows/${workflowTrainTemplate}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(data),
+        });
+      } catch (_) {}
+    }
+    addNotification("info", "Agent saved. Assign a room to this agent to have it auto-respond, or use \"Respond with AI\" in a conversation.", 6000);
     goTo("workflows");
   }
 
@@ -1326,7 +1350,11 @@
             {#if currentRoom.description}<p class="context-bar-desc">{currentRoom.description}</p>{/if}
             <div class="context-bar-meta">
               <label class="context-bar-label" for="context-assigned">Assigned to</label>
-              <input id="context-assigned" type="text" class="context-bar-input" placeholder="Username" bind:value={contextAssignedTo} onblur={() => { const v = contextAssignedTo.trim(); if (currentRoom && String(currentRoom.assignedTo ?? "") !== v) updateRoomMeta(currentRoom.id, { assignedTo: v || null }); }} />
+              {#if currentRoom.assignedTo && (currentRoom.assignedTo.startsWith?.('agent:') ?? false)}
+                <span class="context-bar-assigned-display" id="context-assigned">{getAssignedToDisplay(currentRoom.assignedTo)} <span class="context-bar-agent-badge">Agent</span></span>
+              {:else}
+                <input id="context-assigned" type="text" class="context-bar-input" placeholder="Username" bind:value={contextAssignedTo} onblur={() => { const v = contextAssignedTo.trim(); if (currentRoom && String(currentRoom.assignedTo ?? "") !== v) updateRoomMeta(currentRoom.id, { assignedTo: v || null }); }} />
+              {/if}
               <label class="context-bar-label" for="context-lifecycle">Lifecycle</label>
               <select id="context-lifecycle" class="context-bar-select" bind:value={contextLifecycle} onchange={() => { if (currentRoom && currentRoom.lifecycleStage !== contextLifecycle) updateRoomMeta(currentRoom.id, { lifecycleStage: contextLifecycle || null }); }}>
                 <option value="">—</option>
@@ -3137,6 +3165,25 @@
 
   .context-bar-select {
     cursor: pointer;
+  }
+
+  .context-bar-assigned-display {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.8125rem;
+    color: var(--text-primary);
+  }
+
+  .context-bar-agent-badge {
+    font-size: 0.65rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 0.15rem 0.4rem;
+    border-radius: 4px;
+    background: var(--gray-200);
+    color: var(--text-secondary);
   }
 
   .inbox-list-header {

@@ -192,6 +192,46 @@ export function setWorkflowConfig(template, data) {
   localStorage.setItem(WORKFLOW_CONFIG_PREFIX + template, JSON.stringify(payload));
 }
 
+/** Prefix for room assignment to an agent (workflow template). Stored in assignedTo. */
+export const AGENT_ASSIGN_PREFIX = 'agent:';
+
+/** Agent template keys used in workflows (same as workflow train templates). */
+export const AGENT_TEMPLATES = ['sales-engineer', 'marketing-engineer', 'receptionist'];
+
+/** Human-readable label for an agent template. */
+const AGENT_LABELS = {
+  'sales-engineer': 'Sales Engineer',
+  'marketing-engineer': 'Marketing Engineer',
+  'receptionist': 'Receptionist',
+};
+
+/** True if assignedTo value means the room is assigned to an agent. */
+export function isAssignedToAgent(assignedTo) {
+  return assignedTo && String(assignedTo).startsWith(AGENT_ASSIGN_PREFIX);
+}
+
+/** Get the workflow template key from assignedTo when it's an agent (e.g. "agent:sales-engineer" -> "sales-engineer"). */
+export function getAssignedAgentTemplate(assignedTo) {
+  if (!isAssignedToAgent(assignedTo)) return null;
+  const key = String(assignedTo).slice(AGENT_ASSIGN_PREFIX.length).trim();
+  return AGENT_TEMPLATES.includes(key) ? key : null;
+}
+
+/** Display label for "Assigned to" (username or agent name). */
+export function getAssignedToDisplay(assignedTo) {
+  if (!assignedTo) return '';
+  if (isAssignedToAgent(assignedTo)) {
+    const template = getAssignedAgentTemplate(assignedTo);
+    return template ? AGENT_LABELS[template] : assignedTo;
+  }
+  return String(assignedTo);
+}
+
+/** Build assignedTo value for an agent (e.g. "sales-engineer" -> "agent:sales-engineer"). */
+export function agentAssignValue(templateKey) {
+  return AGENT_TEMPLATES.includes(templateKey) ? AGENT_ASSIGN_PREFIX + templateKey : null;
+}
+
 let audioCtx = null;
 
 function getCtx() {
