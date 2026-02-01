@@ -1,6 +1,6 @@
 <script>
   import { onMount } from "svelte";
-  import { getEnterToSend, setEnterToSend, getCustomSnippets, addCustomSnippet, removeCustomSnippet } from "./theme.js";
+  import { getEnterToSend, setEnterToSend, getCustomSnippets, addCustomSnippet, removeCustomSnippet, getThemePreference, setThemePreference } from "./theme.js";
   import { playClick, playSuccess } from "./theme.js";
 
   export let onBack = () => {};
@@ -14,11 +14,19 @@
   let dataResidency = "default";
   let privacyMessage = "";
   let privacyError = "";
+  let appearancePreference = "system";
 
   onMount(() => {
     enterToSend = getEnterToSend();
     snippets = getCustomSnippets();
+    appearancePreference = getThemePreference();
   });
+
+  function setAppearance(value) {
+    appearancePreference = value;
+    setThemePreference(value);
+    playClick();
+  }
 
   function toggleEnterToSend() {
     enterToSend = !enterToSend;
@@ -88,8 +96,27 @@
   </header>
 
   <div class="settings-content">
+    <section class="settings-section" aria-labelledby="appearance-heading">
+      <h3 id="appearance-heading">Appearance</h3>
+      <p class="setting-desc block">Choose how Nego looks for you.</p>
+      <div class="appearance-options">
+        <label class="appearance-option">
+          <input type="radio" name="appearance" value="light" bind:group={appearancePreference} onchange={() => setAppearance("light")} />
+          <span class="appearance-label">Light</span>
+        </label>
+        <label class="appearance-option">
+          <input type="radio" name="appearance" value="dark" bind:group={appearancePreference} onchange={() => setAppearance("dark")} />
+          <span class="appearance-label">Dark</span>
+        </label>
+        <label class="appearance-option">
+          <input type="radio" name="appearance" value="system" bind:group={appearancePreference} onchange={() => setAppearance("system")} />
+          <span class="appearance-label">System</span>
+        </label>
+      </div>
+    </section>
+
     <section class="settings-section" aria-labelledby="messaging-heading">
-      <h3 id="messaging-heading">Messaging</h3>
+      <h3 id="messaging-heading">Chat &amp; notifications</h3>
       <div class="setting-row">
         <div class="setting-label">
           <span class="setting-name">Send message on Enter</span>
@@ -194,6 +221,33 @@
     font-size: 1.25rem;
     font-weight: 600;
     color: var(--navy-900);
+  }
+
+  .appearance-options {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    margin-top: 0.5rem;
+  }
+
+  .appearance-option {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    cursor: pointer;
+    font-size: 0.9375rem;
+    font-weight: 500;
+    color: var(--text-primary);
+  }
+
+  .appearance-option input {
+    width: 1rem;
+    height: 1rem;
+    accent-color: var(--green-600);
+  }
+
+  .appearance-label {
+    user-select: none;
   }
 
   .settings-content {

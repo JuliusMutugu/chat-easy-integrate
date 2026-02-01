@@ -11,7 +11,7 @@
   let identityConfig = { iprsUrl: "", iprsKey: "", onfidoApiToken: "", stripeIdentityKey: "" };
   let paymentsConfig = { mpesaConsumerKey: "", mpesaConsumerSecret: "", pesapalUrl: "", stripeSecretKey: "", paypalClientId: "" };
   let testTo = "";
-  let testBody = "Test message from messaging platform.";
+  let testBody = "Test message from Nego.";
   let testSubject = "Test email";
   let saving = false;
   let sending = false;
@@ -112,7 +112,7 @@
 
   <div class="integrations-content">
     <p class="integrations-intro">
-      Our own engine: Email (SMTP), SMS (your gateway), WhatsApp (your API). No Twilio dependency. Configure once, send from the platform.
+      Nego engine: Email (SMTP) sends when configured. SMS and WhatsApp work when you set your gateway/API URL; otherwise test messages are logged only. Identity and Payments config is saved and used in-app for verification and payment requests.
     </p>
 
     {#if message}
@@ -156,7 +156,7 @@
     {:else if activeChannel === "sms"}
       <section class="channel-panel">
         <h3>SMS</h3>
-        <p class="channel-desc">Your own gateway. We POST <code>{ to, body }</code> to your URL. You implement the carrier (SMPP, HTTP API, etc.).</p>
+        <p class="channel-desc">Your own gateway. We POST <code>{'{ to, body }'}</code> to your URL. Set Gateway URL to send; leave empty for dev (logged only).</p>
         <div class="form">
           <label>Gateway URL <input type="url" bind:value={smsConfig.gatewayUrl} placeholder="https://your-sms-gateway.com/send" /></label>
           <label>API key (optional) <input type="password" bind:value={smsConfig.apiKey} placeholder="Bearer token" /></label>
@@ -175,7 +175,7 @@
     {:else if activeChannel === "whatsapp"}
       <section class="channel-panel">
         <h3>WhatsApp</h3>
-        <p class="channel-desc">Your own adapter. We POST to your API URL; you plug Meta WhatsApp Business API or any compatible provider.</p>
+        <p class="channel-desc">Your own adapter. Set API URL to send; leave empty for dev (logged only). We POST to your endpoint; you plug Meta WhatsApp Business API or compatible provider.</p>
         <div class="form">
           <label>API URL <input type="url" bind:value={whatsappConfig.apiUrl} placeholder="https://your-whatsapp-api.com/send" /></label>
           <label>Token (optional) <input type="password" bind:value={whatsappConfig.token} /></label>
@@ -195,7 +195,7 @@
     {:else if activeChannel === "identity"}
       <section class="channel-panel">
         <h3>Identity verification</h3>
-        <p class="channel-desc">Local: IPRS (Kenya). Global: Onfido, Stripe Identity. Verify participants are who they say they are.</p>
+        <p class="channel-desc">Local: IPRS (Kenya). Global: Onfido, Stripe Identity. Config is used in-app for identity verification when you enable it in a room.</p>
         <div class="form">
           <label>IPRS API URL (Kenya) <input type="url" bind:value={identityConfig.iprsUrl} placeholder="https://iprs-api.example.com" /></label>
           <label>IPRS API key <input type="password" bind:value={identityConfig.iprsKey} placeholder="API key" /></label>
@@ -209,7 +209,7 @@
     {:else if activeChannel === "payments"}
       <section class="channel-panel">
         <h3>Payments (dual-currency / dual-gateway)</h3>
-        <p class="channel-desc">Local: M-Pesa (Daraja), Pesapal. Global: Stripe, PayPal. Configure per room or org.</p>
+        <p class="channel-desc">Local: M-Pesa (Daraja), Pesapal. Global: Stripe, PayPal. Config is used in-app for payment requests and invoices.</p>
         <div class="form">
           <label>M-Pesa (Daraja) consumer key <input type="text" bind:value={paymentsConfig.mpesaConsumerKey} placeholder="Consumer key" /></label>
           <label>M-Pesa consumer secret <input type="password" bind:value={paymentsConfig.mpesaConsumerSecret} placeholder="Consumer secret" /></label>

@@ -134,7 +134,7 @@ How to join:
 
 <div class="room-list">
   <div class="list-header">
-    <h3 class="list-title">Messaging</h3>
+    <h3 class="list-title">Your rooms</h3>
     <div class="list-actions">
       <div class="search-wrap">
         <input

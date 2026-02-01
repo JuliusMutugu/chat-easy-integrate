@@ -456,6 +456,27 @@ export async function deletePendingJoinRequest(requestId) {
   await db.run("DELETE FROM pending_join_requests WHERE id = ?", [requestId]);
 }
 
+/** All pending join requests for rooms created by this username */
+export async function getPendingJoinRequestsForCreator(creatorUsername) {
+  if (!creatorUsername) return [];
+  const rows = await db.all(
+    `SELECT p.id, p.room_id, p.requester_username, p.requester_socket_id, p.created_at, r.name AS room_name
+     FROM pending_join_requests p
+     JOIN rooms r ON r.id = p.room_id
+     WHERE r.created_by_username = ? AND p.status = 'pending'
+     ORDER BY p.created_at DESC`,
+    [creatorUsername]
+  );
+  return rows.map((r) => ({
+    requestId: r.id,
+    roomId: r.room_id,
+    roomName: r.room_name,
+    requesterUsername: r.requester_username,
+    requesterSocketId: r.requester_socket_id,
+    createdAt: r.created_at,
+  }));
+}
+
 // Message operations
 export async function saveMessage(roomId, username, message, replyToMessageId = null) {
   const result = await db.run(

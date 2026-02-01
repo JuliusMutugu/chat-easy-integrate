@@ -5,6 +5,12 @@
   export let onRoomCreated = () => {};
   export let onBack = () => {};
 
+  const suggestions = {
+    names: ["Deal with Acme", "Sales negotiation", "Project Alpha", "Contract review", "Partnership discussion"],
+    descriptions: ["Discuss terms and close the deal.", "Ongoing sales and pricing.", "Project coordination and updates.", "Review and sign documents.", "Explore collaboration."],
+    maxUsersOptions: [5, 10, 15, 20, 50],
+  };
+
   let formData = {
     name: "",
     description: "",
@@ -12,6 +18,12 @@
   };
   let isSubmitting = false;
   let error = null;
+
+  function applySuggestion(field, value) {
+    if (field === "name") formData.name = value;
+    if (field === "description") formData.description = value;
+    if (field === "maxUsers") formData.maxUsers = value;
+  }
 
   async function handleSubmit(event) {
     event.preventDefault();
@@ -68,6 +80,11 @@
           required
           maxlength="50"
         />
+        <div class="suggestions" aria-label="Suggested names">
+          {#each suggestions.names as name}
+            <button type="button" class="suggestion-chip" onclick={() => applySuggestion("name", name)}>{name}</button>
+          {/each}
+        </div>
       </div>
 
       <div class="field">
@@ -80,6 +97,11 @@
           maxlength="200"
         ></textarea>
         <small>{formData.description.length}/200</small>
+        <div class="suggestions" aria-label="Suggested descriptions">
+          {#each suggestions.descriptions as desc}
+            <button type="button" class="suggestion-chip" onclick={() => applySuggestion("description", desc)}>{desc}</button>
+          {/each}
+        </div>
       </div>
 
       <div class="field">
@@ -92,6 +114,11 @@
           max="50"
         />
         <small>Between 2 and 50</small>
+        <div class="suggestions suggestions-inline" aria-label="Quick select">
+          {#each suggestions.maxUsersOptions as n}
+            <button type="button" class="suggestion-chip" class:selected={formData.maxUsers === n} onclick={() => applySuggestion("maxUsers", n)}>{n}</button>
+          {/each}
+        </div>
       </div>
 
       <div class="actions">
@@ -234,6 +261,42 @@
     margin-top: 0.25rem;
     color: var(--gray-500);
     font-size: 0.75rem;
+  }
+
+  .suggestions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+  }
+
+  .suggestions-inline {
+    margin-top: 0.35rem;
+  }
+
+  .suggestion-chip {
+    padding: 0.35rem 0.65rem;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--gray-50);
+    color: var(--text-secondary);
+    font-size: 0.8125rem;
+    font-family: inherit;
+    cursor: pointer;
+    transition: border-color 0.15s ease, background-color 0.15s ease, color 0.15s ease;
+  }
+
+  .suggestion-chip:hover {
+    border-color: var(--green-500);
+    background: var(--green-50);
+    color: var(--green-800);
+  }
+
+  .suggestion-chip.selected {
+    border-color: var(--green-600);
+    background: var(--green-100);
+    color: var(--green-800);
+    font-weight: 600;
   }
 
   .actions {

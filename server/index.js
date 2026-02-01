@@ -28,6 +28,7 @@ import {
   addPendingJoinRequest,
   getPendingJoinRequest,
   deletePendingJoinRequest,
+  getPendingJoinRequestsForCreator,
   saveMessage,
   getRoomMessages,
   getChannelConfig,
@@ -182,6 +183,20 @@ app.get("/api/rooms/code/:roomCode", async (req, res) => {
   } catch (error) {
     console.error("Error fetching room by code:", error);
     res.status(500).json({ error: "Failed to fetch room" });
+  }
+});
+
+app.get("/api/rooms/pending-requests", async (req, res) => {
+  try {
+    const creator = req.query.creator;
+    if (!creator || typeof creator !== "string") {
+      return res.json([]);
+    }
+    const list = await getPendingJoinRequestsForCreator(creator.trim());
+    res.json(list);
+  } catch (error) {
+    console.error("Error fetching pending requests:", error);
+    res.status(500).json({ error: "Failed to fetch pending requests" });
   }
 });
 
@@ -360,10 +375,12 @@ function getServerBaseUrl(req) {
   return `${req.protocol}://${req.get("host")}`;
 }
 
+const CHANNEL_NAMES = ["email", "sms", "whatsapp", "identity", "payments"];
+
 app.get("/api/channels/:channel", async (req, res) => {
   try {
     const { channel } = req.params;
-    if (!["email", "sms", "whatsapp"].includes(channel)) {
+    if (!CHANNEL_NAMES.includes(channel)) {
       return res.status(400).json({ error: "Invalid channel" });
     }
     const data = await getChannelConfig(channel);
@@ -377,7 +394,7 @@ app.get("/api/channels/:channel", async (req, res) => {
 app.put("/api/channels/:channel", async (req, res) => {
   try {
     const { channel } = req.params;
-    if (!["email", "sms", "whatsapp"].includes(channel)) {
+    if (!CHANNEL_NAMES.includes(channel)) {
       return res.status(400).json({ error: "Invalid channel" });
     }
     const config = req.body || {};

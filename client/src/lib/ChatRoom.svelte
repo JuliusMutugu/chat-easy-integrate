@@ -1313,23 +1313,27 @@ How to join:
         <div class="quick-replies-wrap">
           <button
             type="button"
-            class="btn-quick-replies"
+            class="btn-quick-replies btn-quick-replies-icon"
             onclick={() => { showCustomSnippets = false; showQuickReplies = !showQuickReplies; }}
             title="Quick replies"
             aria-expanded={showQuickReplies}
             aria-haspopup="true"
+            aria-label="Quick replies"
           >
-            Quick replies
+            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+            <span class="btn-quick-replies-label">Quick replies</span>
           </button>
           <button
             type="button"
-            class="btn-quick-replies"
+            class="btn-quick-replies btn-quick-replies-icon"
             onclick={() => { showQuickReplies = false; showCustomSnippets = !showCustomSnippets; }}
             title="Custom snippets"
             aria-expanded={showCustomSnippets}
             aria-haspopup="true"
+            aria-label="Custom snippets"
           >
-            Snippets
+            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+            <span class="btn-quick-replies-label">Snippets</span>
           </button>
           {#if showQuickReplies}
             <div class="quick-replies-dropdown" role="menu">
@@ -1377,11 +1381,12 @@ How to join:
       <div class="input-actions-row">
         <button
           type="button"
-          class="btn-location"
+          class="btn-location btn-location-icon"
           onclick={shareLocation}
           title="Share live location"
+          aria-label="Share location"
         >
-          Location
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
         </button>
         <button
           type="button"
@@ -2458,13 +2463,21 @@ How to join:
     background: var(--green-600);
     color: var(--white);
     border: none;
-    border-radius: 8px;
-    padding: 0.5rem 1rem;
+    border-radius: 10px;
+    padding: 0.5rem;
     cursor: pointer;
-    font-size: 0.8125rem;
-    font-weight: 600;
     font-family: inherit;
     transition: background-color 0.15s ease, transform 0.2s var(--ease-spring);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .btn-location-icon {
+    width: 2.5rem;
+    height: 2.5rem;
+    min-width: 2.5rem;
+    min-height: 2.5rem;
   }
 
   .btn-location:hover {
@@ -2563,6 +2576,24 @@ How to join:
     cursor: pointer;
     font-family: inherit;
     transition: background-color 0.15s ease, border-color 0.15s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+  }
+
+  .btn-quick-replies-icon {
+    padding: 0.5rem;
+    border-radius: 10px;
+  }
+
+  .btn-quick-replies-icon .btn-quick-replies-label {
+    display: none;
+  }
+
+  @media (min-width: 420px) {
+    .btn-quick-replies-icon .btn-quick-replies-label {
+      display: inline;
+    }
   }
 
   .btn-quick-replies:hover {

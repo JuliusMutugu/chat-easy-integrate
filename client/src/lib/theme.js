@@ -3,20 +3,53 @@ const SOUND_KEY = 'soundEnabled';
 const ENTER_TO_SEND_KEY = 'enterToSend';
 const CUSTOM_SNIPPETS_KEY = 'customSnippets';
 
+/** Resolved theme for CSS: 'light' or 'dark' */
 export function getTheme() {
-  return document.documentElement.getAttribute('data-theme') || (typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+  const stored = typeof localStorage !== 'undefined' ? localStorage.getItem(THEME_KEY) : null;
+  if (stored === 'dark' || stored === 'light') return stored;
+  if (stored === 'system' || !stored) {
+    return typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  }
+  return typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+}
+
+/** User preference: 'light' | 'dark' | 'system' */
+export function getThemePreference() {
+  if (typeof localStorage === 'undefined') return 'system';
+  const v = localStorage.getItem(THEME_KEY);
+  return v === 'dark' || v === 'light' || v === 'system' ? v : 'system';
+}
+
+export function setThemePreference(preference) {
+  const v = preference === 'dark' || preference === 'light' || preference === 'system' ? preference : 'system';
+  if (typeof localStorage !== 'undefined') localStorage.setItem(THEME_KEY, v);
+  const resolved = v === 'system'
+    ? (typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+    : v;
+  document.documentElement.setAttribute('data-theme', resolved);
+  return v;
+}
+
+export function applySystemTheme() {
+  if (getThemePreference() !== 'system') return;
+  const resolved = typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  document.documentElement.setAttribute('data-theme', resolved);
 }
 
 export function setTheme(theme) {
-  const v = theme === 'dark' ? 'dark' : 'light';
-  document.documentElement.setAttribute('data-theme', v);
+  const v = theme === 'dark' ? 'dark' : theme === 'light' ? 'light' : 'system';
   if (typeof localStorage !== 'undefined') localStorage.setItem(THEME_KEY, v);
-  return v;
+  const resolved = v === 'system'
+    ? (typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+    : v;
+  document.documentElement.setAttribute('data-theme', resolved);
+  return resolved;
 }
 
 export function toggleTheme() {
   const next = getTheme() === 'dark' ? 'light' : 'dark';
-  return setTheme(next);
+  setThemePreference(next);
+  return next;
 }
 
 export function isSoundEnabled() {

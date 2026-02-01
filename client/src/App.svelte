@@ -1,7 +1,7 @@
 <script>
   import { onMount } from "svelte";
   import MessagingModule from "./lib/MessagingModule.svelte";
-  import { toggleTheme, getTheme, isSoundEnabled, setSoundEnabled, playClick, playSuccess, playOpen } from "./lib/theme.js";
+  import { toggleTheme, getTheme, playClick, playSuccess, playOpen } from "./lib/theme.js";
 
   let showModule = false;
   let config = {
@@ -13,12 +13,10 @@
   let inviteToken = null;
   let quickJoinCode = "";
   let darkMode = false;
-  let soundOn = false;
   let sectionObserver = null;
 
   onMount(() => {
     darkMode = document.documentElement.getAttribute("data-theme") === "dark";
-    soundOn = isSoundEnabled();
 
     const urlParams = new URLSearchParams(window.location.search);
     const roomId = urlParams.get("room");
@@ -58,12 +56,6 @@
     toggleTheme();
     darkMode = document.documentElement.getAttribute("data-theme") === "dark";
     playClick();
-  }
-
-  function handleSoundClick() {
-    setSoundEnabled(!soundOn);
-    soundOn = !soundOn;
-    if (soundOn) playSuccess();
   }
 
   async function handleInviteToken(token) {
@@ -148,16 +140,18 @@
 <main class="landing">
   <header class="nav">
     <div class="nav-inner">
-      <button type="button" class="nav-logo" onclick={() => { playClick(); toggleModule(); }} title="Home (your rooms)">Messaging</button>
+      <button type="button" class="nav-logo brand-nego" onclick={() => { playClick(); toggleModule(); }} title="Home (your rooms)">
+        <img src="/images/logo.jpg" alt="Nego" class="nav-logo-img" />
+        <span class="nav-logo-text">Nego</span>
+      </button>
       <nav class="nav-links" aria-label="Main">
         <button type="button" class="nav-link nav-link-btn" onclick={() => { playClick(); toggleModule(); }} title="Home – your rooms and messages">
           Home
         </button>
         <a href="#features" class="nav-link">Features</a>
-        <a href="#built" class="nav-link">What's live</a>
-        <a href="#coming" class="nav-link">Coming next</a>
         <a href="#pricing" class="nav-link">Pricing</a>
-        <button type="button" class="nav-link nav-link-btn" onclick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>Landing</button>
+        <a href="#about" class="nav-link">About</a>
+        <a href="#contact" class="nav-link">Contact us</a>
       </nav>
       <div class="nav-actions">
         <button
@@ -167,15 +161,6 @@
           aria-label="Home – your rooms"
         >
           Home
-        </button>
-        <button
-          type="button"
-          class="nav-btn nav-btn-ghost"
-          onclick={handleSoundClick}
-          title={soundOn ? "Disable sound" : "Enable sound"}
-          aria-pressed={soundOn}
-        >
-          {soundOn ? "Sound on" : "Sound off"}
         </button>
         <button
           type="button"
@@ -203,7 +188,7 @@
           {/if}
         </button>
         <button type="button" class="nav-btn nav-btn-primary" onclick={toggleModule}>
-          Start messaging
+          Open <span class="brand-nego">Nego</span>
         </button>
       </div>
     </div>
@@ -213,24 +198,28 @@
     <div class="hero-bg">
       <div class="hero-gradient"></div>
       <div class="hero-pattern" aria-hidden="true"></div>
-      <div class="hero-image" aria-hidden="true"></div>
     </div>
     <div class="hero-inner">
       <div class="hero-content">
         <div class="hero-text">
-          <h1 class="hero-title">Deal-ready messaging</h1>
+          <h1 class="hero-title">
+            <span class="hero-brand brand-nego">Nego</span>
+            <span class="hero-tagline"> — deal-ready</span>
+          </h1>
           <p class="hero-subtitle">
-            Live terms, audit trail, and omnichannel—Email, SMS, WhatsApp from one platform. No Twilio lock-in.
+            Live terms, audit trail, and omnichannel—Email, SMS, WhatsApp from one platform. No lock-in.
           </p>
           <div class="hero-pills">
-            <span class="pill">Live deal block</span>
-            <span class="pill">Audit trail</span>
-            <span class="pill">Integrations</span>
-            <span class="pill">Custom snippets</span>
+            <span class="pill">Deal terms & audit</span>
+            <span class="pill">Redlining & e-sign</span>
+            <span class="pill">M-Pesa · Stripe · PayPal</span>
+            <span class="pill">Identity (KYC)</span>
+            <span class="pill">Smart invoicing</span>
+            <span class="pill">KDPP & GDPR</span>
           </div>
           <div class="hero-actions">
             <button class="btn-primary focus-ring" onclick={toggleModule}>
-              Start messaging
+              Open <span class="brand-nego">Nego</span>
             </button>
             <div class="quick-join">
               <input
@@ -253,37 +242,8 @@
           </div>
         </div>
         <div class="hero-visual">
-          <div class="chat-preview" data-animate>
-            <div class="preview-bar">
-              <div class="preview-dots">
-                <span></span><span></span><span></span>
-              </div>
-              <span class="preview-label">Live demo</span>
-            </div>
-            <div class="preview-body">
-              <div class="preview-deal-block">
-                <strong>Current terms</strong> · Price 100 · Qty 1 · SLA 7 days · Tax 16%
-              </div>
-              <div class="preview-msg own">
-                <span>Let's lock this. Deal terms shared.</span>
-              </div>
-              <div class="preview-msg other">
-                <span>Agreed. I've approved the terms.</span>
-              </div>
-              <div class="preview-negotiation">
-                <span>Negotiation: "Extend timeline by 2 weeks"</span>
-                <div class="preview-votes">
-                  <button type="button" class="vote-btn approve">Approve</button>
-                  <button type="button" class="vote-btn reject">Reject</button>
-                </div>
-              </div>
-              <div class="typing-preview">
-                <div class="typing-dots">
-                  <span></span><span></span><span></span>
-                </div>
-                <span>Others are typing...</span>
-              </div>
-            </div>
+          <div class="hero-image-wrap" data-animate>
+            <img src="/images/nego.png" alt="Nego — deal-ready" class="hero-visual-img" />
           </div>
         </div>
       </div>
@@ -378,39 +338,6 @@
     </div>
   </section>
 
-  <section id="built" class="built-section" data-reveal>
-    <div class="container">
-      <h2 class="section-title reveal-title">What’s live now</h2>
-      <p class="built-lead">Everything below is implemented and available in the Dashboard.</p>
-      <ul class="built-list">
-        <li>Rooms, Create room, Join by code or invite link</li>
-        <li>Request to join (invite link) → Creator gets Accept/Decline</li>
-        <li>Pending requests (nav) + Version history (Deal block)</li>
-        <li>Deal block: Current Terms (price, qty, SLA), tax/shipping/margin, Share as message</li>
-        <li>Audit trail: deal_events API + timeline in room</li>
-        <li>Settings: Enter to send, Custom snippets</li>
-        <li>Integrations: Email (SMTP), SMS (your gateway), WhatsApp (your API)</li>
-        <li>Optimistic messaging, @mentions, Reply, Creator remove member</li>
-      </ul>
-    </div>
-  </section>
-
-  <section id="coming" class="coming-section" data-reveal>
-    <div class="container">
-      <h2 class="section-title reveal-title">Coming next</h2>
-      <p class="built-lead">Planned and on the roadmap.</p>
-      <ul class="built-list coming-list">
-        <li>Redlining lite (inline suggestions for contract text)</li>
-        <li>Identity: IPRS (Kenya), Onfido / Stripe Identity</li>
-        <li>M-Pesa (Daraja), Pesapal, Stripe, PayPal</li>
-        <li>Smart invoicing (KRA / VAT on Accept)</li>
-        <li>E-signatures in-app</li>
-        <li>KDPP & GDPR (Right to be Forgotten, Data Residency)</li>
-        <li>RBAC & approval workflows (Manager approves discount)</li>
-      </ul>
-    </div>
-  </section>
-
   <section id="pricing" class="pricing" data-reveal>
     <div class="container">
       <h2 class="section-title reveal-title">Pricing</h2>
@@ -475,6 +402,25 @@
     </div>
   </section>
 
+  <section id="about" class="features" data-reveal>
+    <div class="container">
+      <h2 class="section-title reveal-title">About</h2>
+      <p class="pricing-lead" style="max-width: 56ch; margin-left: auto; margin-right: auto;">
+        Nego is a deal-ready messaging platform. Live terms, audit trail, and omnichannel—Email, SMS, WhatsApp from one place. No lock-in.
+      </p>
+    </div>
+  </section>
+
+  <section id="contact" class="pricing" data-reveal>
+    <div class="container">
+      <h2 class="section-title reveal-title">Contact us</h2>
+      <p class="pricing-lead">Get in touch for support or sales.</p>
+      <p class="pricing-lead" style="margin-top: 0.5rem; font-size: 0.9375rem;">
+        Use the app to start a conversation, or reach out via your preferred channel.
+      </p>
+    </div>
+  </section>
+
   <section class="config-block" data-reveal>
     <div class="container">
       <div class="config-card reveal-card" data-reveal>
@@ -521,7 +467,15 @@
     position: relative;
   }
 
-  .nav {
+  /* Nego brand: same style everywhere — clean, white on dark, sans-serif, bold */
+  .brand-nego {
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    font-family: inherit;
+    text-transform: none;
+  }
+
+  .landing .nav {
     position: fixed;
     top: 0;
     left: 0;
@@ -529,6 +483,47 @@
     z-index: 100;
     background: var(--bg-primary);
     border-bottom: 1px solid var(--border);
+    padding: 0.75rem 1.5rem;
+    transition: background-color var(--duration-normal) var(--ease-in-out),
+      border-color var(--duration-normal) var(--ease-in-out);
+  }
+
+  .landing .nav .nav-logo,
+  .landing .nav .nav-link,
+  .landing .nav .nav-link-btn {
+    color: var(--text-primary);
+  }
+
+  .landing .nav .nav-link:hover,
+  .landing .nav .nav-link-btn:hover {
+    color: var(--green-600);
+  }
+
+  .landing .nav .nav-btn-ghost {
+    border-color: var(--border);
+    color: var(--text-secondary);
+  }
+
+  .landing .nav .nav-btn-ghost:hover {
+    background: var(--bg-secondary);
+    border-color: var(--gray-300);
+    color: var(--text-primary);
+  }
+
+  .landing .nav .nav-icon {
+    color: var(--text-primary);
+  }
+
+  :global([data-theme="dark"]) .landing .nav .nav-logo-img {
+    filter: brightness(0) invert(1);
+  }
+
+  .nav {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 100;
     padding: 0.75rem 1.5rem;
     transition: background-color var(--duration-normal) var(--ease-in-out),
       border-color var(--duration-normal) var(--ease-in-out);
@@ -544,6 +539,9 @@
   }
 
   .nav-logo {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
     font-size: 1.125rem;
     font-weight: 700;
     color: var(--text-primary);
@@ -554,6 +552,20 @@
     cursor: pointer;
     padding: 0;
     font-family: inherit;
+  }
+
+  .nav-logo-img {
+    width: 32px;
+    height: 32px;
+    min-width: 32px;
+    min-height: 32px;
+    object-fit: cover;
+    flex-shrink: 0;
+    border-radius: 50%;
+  }
+
+  .nav-logo-text {
+    flex-shrink: 0;
   }
 
   .nav-logo:hover {
@@ -854,20 +866,6 @@
     background-image: url("data:image/svg+xml,%3Csvg width='40' height='40' viewBox='0 0 40 40' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M0 0h40v40H0z' fill='none'/%3E%3Cpath d='M20 20m-2 0a2 2 0 1 1 4 0a2 2 0 1 1 -4 0' fill='%23fff' fill-opacity='1'/%3E%3C/svg%3E");
   }
 
-  .hero-image {
-    position: absolute;
-    right: 0;
-    top: 50%;
-    transform: translateY(-50%);
-    width: 45%;
-    max-width: 560px;
-    height: 70%;
-    max-height: 420px;
-    background: linear-gradient(135deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0) 100%);
-    border-radius: 12px;
-    border: 1px solid rgba(255,255,255,0.08);
-  }
-
   .hero-inner {
     position: relative;
     z-index: 1;
@@ -889,45 +887,56 @@
 
   .hero-title {
     font-size: clamp(2.25rem, 4vw, 3.5rem);
-    font-weight: 700;
     line-height: 1.1;
-    letter-spacing: -0.02em;
     margin-bottom: 1.25rem;
     opacity: 0;
     animation: fadeUp 0.8s var(--ease-out-expo) 0.1s forwards;
   }
 
+  .hero-brand {
+    display: block;
+    font-size: 1em;
+    color: var(--white);
+  }
+
+  .hero-tagline {
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    color: rgba(255, 255, 255, 0.92);
+  }
+
   .hero-subtitle {
-    font-size: 1.2rem;
-    line-height: 1.5;
-    opacity: 0.9;
-    margin-bottom: 2rem;
+    font-size: 1.125rem;
+    line-height: 1.55;
+    color: rgba(255, 255, 255, 0.9);
+    margin-bottom: 1.5rem;
     opacity: 0;
     animation: fadeUp 0.8s var(--ease-out-expo) 0.2s forwards;
   }
 
   .hero-pills {
     display: flex;
-    gap: 1rem;
-    margin-bottom: 2.5rem;
+    gap: 0.5rem 0.75rem;
+    margin-bottom: 1.75rem;
     flex-wrap: wrap;
     opacity: 0;
     animation: fadeUp 0.8s var(--ease-out-expo) 0.3s forwards;
   }
 
   .pill {
-    background: rgba(255, 255, 255, 0.12);
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    padding: 0.5rem 1rem;
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    padding: 0.4rem 0.85rem;
     border-radius: 999px;
-    font-size: 0.875rem;
+    font-size: 0.8125rem;
     font-weight: 500;
+    color: rgba(255, 255, 255, 0.95);
   }
 
   .hero-actions {
     display: flex;
     flex-direction: column;
-    gap: 1.25rem;
+    gap: 1rem;
     opacity: 0;
     animation: fadeUp 0.8s var(--ease-out-expo) 0.4s forwards;
   }
@@ -951,6 +960,10 @@
     background: var(--green-700);
     transform: translateY(-2px);
     box-shadow: 0 12px 28px rgba(45, 106, 79, 0.35);
+  }
+
+  .btn-primary .brand-nego {
+    color: inherit;
   }
 
   .btn-primary:active {
@@ -1010,142 +1023,21 @@
     align-items: center;
   }
 
-  .chat-preview {
-    background: var(--white);
-    border-radius: 16px;
-    box-shadow: 0 32px 64px rgba(0, 0, 0, 0.25);
-    overflow: hidden;
+  .hero-image-wrap {
     width: 100%;
-    max-width: 380px;
-    transform: translateY(24px) rotate(-1.5deg);
+    max-width: 420px;
     opacity: 0;
     animation: cardIn 1s var(--ease-out-expo) 0.5s forwards;
   }
 
-  .chat-preview:hover {
-    transform: translateY(0) rotate(0) scale(1.02);
-    box-shadow: 0 40px 80px rgba(0, 0, 0, 0.3);
-    transition: transform 0.4s var(--ease-spring), box-shadow 0.4s var(--ease-out-expo);
-  }
-
-  .preview-bar {
-    background: var(--navy-800);
-    color: var(--white);
-    padding: 1rem 1.25rem;
-    display: flex;
-    align-items: center;
-    gap: 1rem;
-  }
-
-  .preview-dots {
-    display: flex;
-    gap: 6px;
-  }
-
-  .preview-dots span {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: rgba(255, 255, 255, 0.4);
-  }
-
-  .preview-label {
-    font-weight: 600;
-    font-size: 0.9375rem;
-  }
-
-  .preview-body {
-    padding: 1.25rem;
-    display: flex;
-    flex-direction: column;
-    gap: 1rem;
-    min-height: 280px;
-  }
-
-  .preview-msg {
-    max-width: 85%;
-    padding: 0.75rem 1rem;
+  .hero-visual-img {
+    width: 100%;
+    height: auto;
+    display: block;
     border-radius: 12px;
-    font-size: 0.875rem;
-    animation: msgIn 0.5s var(--ease-out-expo) backwards;
+    box-shadow: 0 24px 48px rgba(0, 0, 0, 0.25);
+    border: 1px solid rgba(255, 255, 255, 0.1);
   }
-
-  .preview-msg.own {
-    align-self: flex-end;
-    background: var(--navy-700);
-    color: var(--white);
-    animation-delay: 0.8s;
-  }
-
-  .preview-msg.other {
-    align-self: flex-start;
-    background: var(--gray-100);
-    color: var(--gray-900);
-    animation-delay: 1s;
-  }
-
-  .preview-negotiation {
-    background: var(--green-100);
-    color: var(--green-800);
-    padding: 0.75rem 1rem;
-    border-radius: 10px;
-    font-size: 0.75rem;
-    text-align: center;
-    border: 1px solid var(--green-400);
-    animation: msgIn 0.5s var(--ease-out-expo) 1.2s backwards;
-  }
-
-  .preview-votes {
-    display: flex;
-    gap: 0.5rem;
-    margin-top: 0.5rem;
-    justify-content: center;
-  }
-
-  .vote-btn {
-    padding: 0.375rem 0.75rem;
-    border: none;
-    border-radius: 8px;
-    font-size: 0.75rem;
-    font-weight: 600;
-    cursor: default;
-    font-family: inherit;
-  }
-
-  .vote-btn.approve {
-    background: var(--green-600);
-    color: var(--white);
-  }
-
-  .vote-btn.reject {
-    background: var(--gray-500);
-    color: var(--white);
-  }
-
-  .typing-preview {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    color: var(--gray-500);
-    font-size: 0.75rem;
-  }
-
-  .typing-dots {
-    display: flex;
-    gap: 3px;
-  }
-
-  .typing-dots span {
-    width: 4px;
-    height: 4px;
-    background: var(--navy-600);
-    border-radius: 50%;
-    animation: typingBounce 1.2s var(--ease-out-expo) infinite;
-  }
-
-  .typing-dots span:nth-child(1) { animation-delay: 0s; }
-  .typing-dots span:nth-child(2) { animation-delay: 0.15s; }
-  .typing-dots span:nth-child(3) { animation-delay: 0.3s; }
 
   @keyframes fadeUp {
     from {
@@ -1472,35 +1364,79 @@
       max-width: 100%;
     }
 
-    .chat-preview {
-      max-width: 320px;
+    .hero-image-wrap {
+      max-width: 280px;
       margin: 0 auto;
-    }
-
-    .hero-image {
-      display: none;
     }
   }
 
   @media (max-width: 480px) {
+    .nav {
+      padding: 0.5rem 0.75rem;
+    }
+
+    .nav-inner {
+      gap: 0.5rem;
+    }
+
+    .nav-logo {
+      font-size: 1rem;
+    }
+
     .hero {
-      padding: 3rem 1rem;
+      padding: 3rem 1rem 2.5rem;
+      min-height: auto;
     }
 
     .hero-title {
-      font-size: 1.875rem;
+      font-size: 1.75rem;
     }
 
     .hero-subtitle {
-      font-size: 1rem;
+      font-size: 0.9375rem;
+    }
+
+    .hero-pills {
+      gap: 0.5rem;
+    }
+
+    .pill {
+      font-size: 0.75rem;
+      padding: 0.35rem 0.75rem;
     }
 
     .quick-join {
       flex-direction: column;
+      width: 100%;
     }
 
     .btn-join {
       width: 100%;
+    }
+
+    .features {
+      padding: 3rem 1rem;
+    }
+
+    .feature-grid {
+      grid-template-columns: 1fr;
+      gap: 1.25rem;
+    }
+
+    .feature-card {
+      padding: 1.25rem;
+    }
+
+    .pricing {
+      padding: 3rem 1rem;
+    }
+
+    .config-block {
+      padding: 2.5rem 1rem;
+    }
+
+    .config-card {
+      padding: 1.5rem;
     }
   }
 </style>
