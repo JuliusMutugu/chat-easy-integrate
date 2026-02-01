@@ -20,6 +20,10 @@ services:
         generateValue: true
       - key: DATABASE_PATH
         value: ./server/messaging.db
+      - key: SERVER_URL
+        sync: false
+      - key: CLIENT_URL
+        sync: false
       - key: GEMINI_API_KEY
         sync: false
       - key: AFRICASTALKING_USERNAME
