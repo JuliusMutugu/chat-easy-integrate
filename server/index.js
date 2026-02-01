@@ -119,7 +119,10 @@ app.use(express.json());
 app.use(sessionMiddleware);
 
 // Socket.io uses the same session middleware
-io.engine.use(sessionMiddleware);
+// Wrap sessionMiddleware for socket.io to handle async properly
+io.engine.use((req, res, next) => {
+  sessionMiddleware(req, res, next);
+});
 
 // Initialize database
 await initDatabase();
@@ -1473,22 +1476,26 @@ io.on("connection", async (socket) => {
     }
   }
 
+  // Check authentication for non-widget connections
+  // Note: Allow connection but track authentication status
+  let authenticatedUser = null;
   if (!isWidget) {
-    const userId = socket.request.session?.userId;
-    if (!userId) {
-      console.log("Unauthenticated socket connection:", socket.id);
-      socket.emit("error", { message: "Not authenticated. Please log in." });
-      socket.disconnect();
-      return;
+    const req = socket.request;
+    const userId = req.session?.userId;
+    
+    if (userId) {
+      const user = await getUserById(userId);
+      if (user) {
+        authenticatedUser = user;
+        console.log("Authenticated user connected:", user.email, socket.id);
+      } else {
+        console.log("Invalid user ID in session:", userId, socket.id);
+      }
+    } else {
+      console.log("No userId in session for socket:", socket.id);
+      // Don't disconnect - user might be on landing page or about to login
+      // They'll authenticate when they perform actions that require auth
     }
-    const user = await getUserById(userId);
-    if (!user) {
-      console.log("Invalid user for socket:", socket.id);
-      socket.emit("error", { message: "User not found" });
-      socket.disconnect();
-      return;
-    }
-    console.log("Authenticated user connected:", user.email, socket.id);
   }
 
   socket.on("set-username", ({ username }) => {
@@ -1500,6 +1507,16 @@ io.on("connection", async (socket) => {
 
   socket.on("join-room", async ({ roomId, username }) => {
     try {
+      // Check authentication for non-widget connections
+      if (!isWidget) {
+        const userId = socket.request.session?.userId;
+        if (!userId) {
+          console.log("Unauthenticated join-room attempt:", socket.id, roomId);
+          socket.emit("error", { message: "Not authenticated. Please log in." });
+          return;
+        }
+      }
+      
       const room = await getRoomById(roomId);
       if (!room) {
         socket.emit("error", { message: "Room not found" });
@@ -1541,6 +1558,14 @@ io.on("connection", async (socket) => {
   // Request to join via invite link (creator gets accept/decline; requester waits for join-approved or join-declined)
   socket.on("request-join-room", async ({ inviteToken, username }) => {
     try {
+      // Check authentication
+      const userId = socket.request.session?.userId;
+      if (!userId) {
+        console.log("Unauthenticated request-join-room attempt:", socket.id);
+        socket.emit("error", { message: "Not authenticated. Please log in." });
+        return;
+      }
+      
       if (!inviteToken || !username?.trim()) {
         socket.emit("error", { message: "inviteToken and username are required" });
         return;
