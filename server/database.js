@@ -211,6 +211,10 @@ export async function initDatabase() {
       { name: "last_message_from_username", type: "TEXT" },
       { name: "last_message_preview", type: "TEXT" },
       { name: "campaign_id", type: "TEXT" },
+      { name: "qualification_status", type: "TEXT" },
+      { name: "qualification_notes", type: "TEXT" },
+      { name: "is_best_customer", type: "INTEGER DEFAULT 0" },
+      { name: "status", type: "TEXT DEFAULT 'active'" },
     ];
     for (const { name, type } of inboxCols) {
       if (!colNames.includes(name)) {
@@ -283,6 +287,29 @@ export async function initDatabase() {
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       );
       CREATE INDEX IF NOT EXISTS idx_campaigns_status ON campaigns (status);
+
+      CREATE TABLE IF NOT EXISTS icp_config (
+        user_id TEXT PRIMARY KEY,
+        industry TEXT,
+        company_size TEXT,
+        role TEXT,
+        needs TEXT,
+        pain_points TEXT,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+      );
+
+      CREATE TABLE IF NOT EXISTS nurture_templates (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        channel TEXT DEFAULT 'email',
+        subject TEXT,
+        body TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+      );
+      CREATE INDEX IF NOT EXISTS idx_nurture_user ON nurture_templates (user_id);
     `);
 
     console.log("✅ Database initialized successfully");
@@ -376,7 +403,7 @@ export async function getRoomById(roomId) {
   if (!room) return null;
 
   const userCount = await db.get(
-    "SELECT COUNT(*) as count FROM room_users WHERE room_id = ?",
+    "SELECT COUNT(DISTINCT username) as count FROM room_users WHERE room_id = ?",
     [roomId]
   );
 
@@ -402,6 +429,10 @@ export async function getRoomById(roomId) {
     lastMessageFromUsername: room.last_message_from_username ?? null,
     lastMessagePreview: room.last_message_preview ?? null,
     campaignId: room.campaign_id ?? null,
+    qualificationStatus: room.qualification_status ?? null,
+    qualificationNotes: room.qualification_notes ?? null,
+    isBestCustomer: !!(room.is_best_customer),
+    status: room.status || "active",
   };
 }
 
@@ -423,7 +454,7 @@ async function roomsWithCounts(roomRows) {
   return Promise.all(
     roomRows.map(async (room) => {
       const userCount = await db.get(
-        "SELECT COUNT(*) as count FROM room_users WHERE room_id = ?",
+        "SELECT COUNT(DISTINCT username) as count FROM room_users WHERE room_id = ?",
         [room.id]
       );
       return {
@@ -448,6 +479,10 @@ async function roomsWithCounts(roomRows) {
         lastMessageFromUsername: room.last_message_from_username ?? null,
         lastMessagePreview: room.last_message_preview ?? null,
         campaignId: room.campaign_id ?? null,
+        qualificationStatus: room.qualification_status ?? null,
+        qualificationNotes: room.qualification_notes ?? null,
+        isBestCustomer: !!(room.is_best_customer),
+        status: room.status || "active",
       };
     })
   );
@@ -521,10 +556,11 @@ export async function removeUserFromRoom(socketId) {
 }
 
 export async function getRoomUsers(roomId) {
-  const users = await db.all("SELECT * FROM room_users WHERE room_id = ?", [
-    roomId,
-  ]);
-  return users;
+  const users = await db.all(
+    "SELECT DISTINCT username FROM room_users WHERE room_id = ? ORDER BY username",
+    [roomId]
+  );
+  return users.map(u => u.username);
 }
 
 export async function getUserBySocketId(socketId) {
@@ -630,8 +666,8 @@ export async function saveMessage(roomId, username, message, replyToMessageId = 
   };
 }
 
-/** Update room inbox meta (assigned to, lifecycle, team, channel type, campaign). */
-export async function updateRoomMeta(roomId, { assignedTo, lifecycleStage, teamName, channelType, campaignId }) {
+/** Update room inbox meta (assigned to, lifecycle, team, channel type, campaign, qualification, best customer, status). */
+export async function updateRoomMeta(roomId, { assignedTo, lifecycleStage, teamName, channelType, campaignId, qualificationStatus, qualificationNotes, isBestCustomer, status }) {
   const room = await db.get("SELECT id FROM rooms WHERE id = ?", [roomId]);
   if (!room) return null;
 
@@ -656,6 +692,22 @@ export async function updateRoomMeta(roomId, { assignedTo, lifecycleStage, teamN
   if (campaignId !== undefined) {
     updates.push("campaign_id = ?");
     values.push(campaignId === "" || campaignId == null ? null : campaignId);
+  }
+  if (qualificationStatus !== undefined) {
+    updates.push("qualification_status = ?");
+    values.push(qualificationStatus === "" || qualificationStatus == null ? null : qualificationStatus);
+  }
+  if (qualificationNotes !== undefined) {
+    updates.push("qualification_notes = ?");
+    values.push(qualificationNotes === "" || qualificationNotes == null ? null : qualificationNotes);
+  }
+  if (isBestCustomer !== undefined) {
+    updates.push("is_best_customer = ?");
+    values.push(isBestCustomer ? 1 : 0);
+  }
+  if (status !== undefined) {
+    updates.push("status = ?");
+    values.push(status === "" || status == null ? "active" : status);
   }
   if (updates.length === 0) return getRoomById(roomId);
   values.push(roomId);
@@ -908,13 +960,100 @@ export async function deleteCampaign(id) {
   await db.run("DELETE FROM campaigns WHERE id = ?", [id]);
 }
 
+/** Get message count for a room (for engagement scoring) */
+export async function getRoomMessageCount(roomId) {
+  const row = await db.get("SELECT COUNT(*) as count FROM room_messages WHERE room_id = ?", [roomId]);
+  return row?.count ?? 0;
+}
+
+/** Compute engagement score 0–100 from message count + recency */
+function computeEngagementScore(messageCount, lastMessageAt) {
+  let score = Math.min(50, messageCount * 5); // up to 50 from message count
+  if (lastMessageAt) {
+    const hoursSince = (Date.now() - new Date(lastMessageAt).getTime()) / 3600000;
+    if (hoursSince < 1) score += 30;
+    else if (hoursSince < 24) score += 20;
+    else if (hoursSince < 72) score += 10;
+  }
+  return Math.min(100, Math.round(score));
+}
+
+/** Extract keywords from text (min 2 chars, filter common words) */
+function extractKeywords(text) {
+  if (!text || typeof text !== "string") return [];
+  const stop = new Set(["the", "and", "for", "with", "from", "that", "this", "are", "was", "have", "has", "your", "our", "you", "to", "of", "in", "a", "an", "is", "it", "or", "be", "on", "at", "as"]);
+  return text
+    .toLowerCase()
+    .replace(/[,;.!?()]/g, " ")
+    .split(/\s+/)
+    .filter((w) => w.length >= 2 && !stop.has(w));
+}
+
+/** Compute ICP fit score 0–100 from keyword overlap between ICP and lead text */
+function computeIcpFitScore(icp, room) {
+  if (!icp || (!icp.industry && !icp.companySize && !icp.role && !icp.needs && !icp.painPoints)) return null;
+  const icpText = [icp.industry, icp.companySize, icp.role, icp.needs, icp.painPoints].filter(Boolean).join(" ");
+  const icpKeywords = [...new Set(extractKeywords(icpText))];
+  if (icpKeywords.length === 0) return null;
+  const leadText = [room.name, room.description, room.lastMessagePreview].filter(Boolean).join(" ");
+  const leadWords = extractKeywords(leadText);
+  if (leadWords.length === 0) return 0;
+  const matches = icpKeywords.filter((k) => leadWords.some((w) => w.includes(k) || k.includes(w)));
+  const ratio = matches.length / icpKeywords.length;
+  return Math.min(100, Math.round(ratio * 100));
+}
+
+/** ICP config – ideal customer profile */
+export async function getIcpConfigByUserId(userId) {
+  const row = await db.get("SELECT * FROM icp_config WHERE user_id = ?", [userId]);
+  return row
+    ? {
+        industry: row.industry || "",
+        companySize: row.company_size || "",
+        role: row.role || "",
+        needs: row.needs || "",
+        painPoints: row.pain_points || "",
+        updatedAt: row.updated_at ? new Date(row.updated_at) : null,
+      }
+    : null;
+}
+
+export async function setIcpConfig(userId, { industry, companySize, role, needs, painPoints }) {
+  await db.run(
+    `INSERT INTO icp_config (user_id, industry, company_size, role, needs, pain_points, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+     ON CONFLICT(user_id) DO UPDATE SET
+       industry = excluded.industry,
+       company_size = excluded.company_size,
+       role = excluded.role,
+       needs = excluded.needs,
+       pain_points = excluded.pain_points,
+       updated_at = CURRENT_TIMESTAMP`,
+    [
+      userId,
+      industry ?? "",
+      companySize ?? "",
+      role ?? "",
+      needs ?? "",
+      painPoints ?? "",
+    ]
+  );
+  return getIcpConfigByUserId(userId);
+}
+
 /** Get leads for a campaign: rooms + pending join requests for those rooms */
-export async function getLeadsForCampaign(campaignId, username) {
+export async function getLeadsForCampaign(campaignId, username, userId = null) {
   const roomRows = await db.all(
     "SELECT * FROM rooms WHERE campaign_id = ? ORDER BY created_at DESC, last_message_at DESC",
     [campaignId]
   );
   const rooms = await roomsWithCounts(roomRows);
+  const icp = userId ? await getIcpConfigByUserId(userId) : null;
+  for (const room of rooms) {
+    const msgCount = await getRoomMessageCount(room.id);
+    room.engagementScore = computeEngagementScore(msgCount, room.lastMessageAt);
+    room.icpFitScore = computeIcpFitScore(icp, room);
+  }
   const pending = await db.all(
     `SELECT p.*, r.name as room_name FROM pending_join_requests p
      JOIN rooms r ON p.room_id = r.id
@@ -934,9 +1073,126 @@ export async function getLeadsForCampaign(campaignId, username) {
   };
 }
 
+/** Nurture templates */
+export async function createNurtureTemplate(userId, { name, channel, subject, body }) {
+  const id = "nt-" + Date.now() + "-" + Math.random().toString(36).slice(2, 9);
+  await db.run(
+    "INSERT INTO nurture_templates (id, user_id, name, channel, subject, body) VALUES (?, ?, ?, ?, ?, ?)",
+    [id, userId, name || "Untitled", channel || "email", subject || "", body || ""]
+  );
+  return db.get("SELECT * FROM nurture_templates WHERE id = ?", [id]);
+}
+
+export async function getNurtureTemplatesByUserId(userId) {
+  const rows = await db.all("SELECT * FROM nurture_templates WHERE user_id = ? ORDER BY created_at DESC", [userId]);
+  return rows.map((r) => ({ id: r.id, name: r.name, channel: r.channel, subject: r.subject, body: r.body, createdAt: r.created_at }));
+}
+
+export async function deleteNurtureTemplate(id, userId) {
+  await db.run("DELETE FROM nurture_templates WHERE id = ? AND user_id = ?", [id, userId]);
+}
+
+/** Find leads similar to best customers (same source, similar engagement) */
+export async function getSimilarLeads(username, userId = null, limit = 10) {
+  const bestRows = await db.all(
+    `SELECT r.*, c.source as campaign_source FROM rooms r
+     LEFT JOIN campaigns c ON r.campaign_id = c.id
+     WHERE r.is_best_customer = 1
+     AND (r.created_by_username = ? OR EXISTS (SELECT 1 FROM room_users ru WHERE ru.room_id = r.id AND ru.username = ?))`,
+    [username || "", username || ""]
+  );
+  const bestIds = new Set(bestRows.map((r) => r.id));
+  const sources = [...new Set(bestRows.map((r) => (r.campaign_source || "manual").trim() || "manual"))];
+  const sourceSet = sources.length > 0 ? new Set(sources) : new Set(["manual", "widget", "invite", "form"]);
+
+  const candidateRows = await db.all(
+    `SELECT r.*, c.source as campaign_source FROM rooms r
+     LEFT JOIN campaigns c ON r.campaign_id = c.id
+     WHERE r.is_best_customer = 0
+     AND (r.created_by_username = ? OR EXISTS (SELECT 1 FROM room_users ru WHERE ru.room_id = r.id AND ru.username = ?))`,
+    [username || "", username || ""]
+  );
+
+  const matching = candidateRows.filter((r) => {
+    const src = (r.campaign_source || "manual").trim() || "manual";
+    return sourceSet.has(src);
+  });
+
+  const rooms = await roomsWithCounts(matching);
+  for (const room of rooms) {
+    const msgCount = await getRoomMessageCount(room.id);
+    room.engagementScore = computeEngagementScore(msgCount, room.lastMessageAt);
+    const icp = userId ? await getIcpConfigByUserId(userId) : null;
+    room.icpFitScore = computeIcpFitScore(icp, room);
+  }
+  rooms.sort((a, b) => (b.engagementScore ?? 0) - (a.engagementScore ?? 0));
+  return rooms.slice(0, limit);
+}
+
+/** Get campaign/source analytics for a user */
+export async function getCampaignAnalytics(username) {
+  const campaigns = await db.all(
+    "SELECT * FROM campaigns WHERE created_by_username = ? ORDER BY created_at DESC",
+    [username || ""]
+  );
+  const byCampaign = [];
+  const bySource = {};
+
+  for (const camp of campaigns) {
+    const rooms = await db.all(
+      "SELECT id, lifecycle_stage FROM rooms WHERE campaign_id = ?",
+      [camp.id]
+    );
+    const stats = {
+      total: rooms.length,
+      new_lead: rooms.filter((r) => r.lifecycle_stage === "new_lead").length,
+      hot_lead: rooms.filter((r) => r.lifecycle_stage === "hot_lead").length,
+      payment: rooms.filter((r) => r.lifecycle_stage === "payment").length,
+      customer: rooms.filter((r) => r.lifecycle_stage === "customer").length,
+    };
+    stats.converted = stats.payment + stats.customer;
+    stats.conversionRate = stats.total > 0 ? Math.round((stats.converted / stats.total) * 100) : 0;
+
+    byCampaign.push({
+      id: camp.id,
+      name: camp.name,
+      source: camp.source || "manual",
+      ...stats,
+      createdAt: camp.created_at ? new Date(camp.created_at) : null,
+    });
+
+    const src = camp.source || "manual";
+    if (!bySource[src]) {
+      bySource[src] = { total: 0, new_lead: 0, hot_lead: 0, payment: 0, customer: 0, converted: 0, campaigns: 0 };
+    }
+    bySource[src].total += stats.total;
+    bySource[src].new_lead += stats.new_lead;
+    bySource[src].hot_lead += stats.hot_lead;
+    bySource[src].payment += stats.payment;
+    bySource[src].customer += stats.customer;
+    bySource[src].converted += stats.converted;
+    bySource[src].campaigns += 1;
+  }
+
+  const sourceSummary = Object.entries(bySource).map(([source, s]) => ({
+    source,
+    ...s,
+    conversionRate: s.total > 0 ? Math.round((s.converted / s.total) * 100) : 0,
+  })).sort((a, b) => b.total - a.total);
+
+  return { byCampaign, bySource: sourceSummary };
+}
+
 /** Get all leads (rooms with lifecycle new_lead/hot_lead or any campaign room) – for "All leads" view */
-export async function getAllLeads(username) {
-  const rooms = await getRoomsForUser(username);
+export async function getAllLeads(username, userId = null) {
+  let rooms = await getRoomsForUser(username);
+  rooms = rooms.filter((r) => r.lifecycleStage === "new_lead" || r.lifecycleStage === "hot_lead" || r.campaignId);
+  const icp = userId ? await getIcpConfigByUserId(userId) : null;
+  for (const room of rooms) {
+    const msgCount = await getRoomMessageCount(room.id);
+    room.engagementScore = computeEngagementScore(msgCount, room.lastMessageAt);
+    room.icpFitScore = computeIcpFitScore(icp, room);
+  }
   const pending = await db.all(
     `SELECT p.*, r.name as room_name FROM pending_join_requests p
      JOIN rooms r ON p.room_id = r.id
@@ -946,7 +1202,7 @@ export async function getAllLeads(username) {
     [username || "", username || ""]
   );
   return {
-    rooms: rooms.filter((r) => r.lifecycleStage === "new_lead" || r.lifecycleStage === "hot_lead" || r.campaignId),
+    rooms,
     pending: pending.map((p) => ({
       requestId: p.id,
       roomId: p.room_id,

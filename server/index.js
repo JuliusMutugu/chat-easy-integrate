@@ -66,6 +66,13 @@ import {
   deleteCampaign,
   getLeadsForCampaign,
   getAllLeads,
+  getCampaignAnalytics,
+  getIcpConfigByUserId,
+  setIcpConfig,
+  getSimilarLeads,
+  createNurtureTemplate,
+  getNurtureTemplatesByUserId,
+  deleteNurtureTemplate,
 } from "./database.js";
 import { sendEmail, validateEmailConfig } from "./channels/email.js";
 import { sendSmsWithConfig, validateSmsConfig } from "./channels/sms.js";
@@ -564,19 +571,68 @@ app.get("/api/rooms/:roomId", async (req, res) => {
 app.patch("/api/rooms/:roomId/meta", async (req, res) => {
   try {
     const { roomId } = req.params;
-    const { assignedTo, lifecycleStage, teamName, channelType, campaignId } = req.body || {};
+    const { assignedTo, lifecycleStage, teamName, channelType, campaignId, qualificationStatus, qualificationNotes, isBestCustomer, status } = req.body || {};
     const room = await updateRoomMeta(roomId, {
       assignedTo: assignedTo != null ? String(assignedTo).trim() || null : undefined,
       lifecycleStage: lifecycleStage != null ? String(lifecycleStage).trim() || null : undefined,
       teamName: teamName != null ? String(teamName).trim() || null : undefined,
       channelType: channelType != null ? String(channelType).trim() || "chat" : undefined,
       campaignId: campaignId != null ? String(campaignId).trim() || null : undefined,
+      qualificationStatus: qualificationStatus != null ? String(qualificationStatus).trim() || null : undefined,
+      qualificationNotes: qualificationNotes != null ? String(qualificationNotes).trim() || null : undefined,
+      isBestCustomer: isBestCustomer !== undefined ? !!isBestCustomer : undefined,
+      status: status != null ? String(status).trim() || "active" : undefined,
     });
     if (!room) return res.status(404).json({ error: "Room not found" });
     res.json(room);
   } catch (error) {
     console.error("Error updating room meta:", error);
     res.status(500).json({ error: "Failed to update room meta" });
+  }
+});
+
+app.post("/api/rooms/:roomId/kick", requireAuth, async (req, res) => {
+  try {
+    const { roomId } = req.params;
+    const { username } = req.body || {};
+    if (!username) return res.status(400).json({ error: "username required" });
+    
+    const room = await getRoomById(roomId);
+    if (!room) return res.status(404).json({ error: "Room not found" });
+    
+    const user = await getUserById(req.session.userId);
+    if (room.createdByUsername !== user?.name) {
+      return res.status(403).json({ error: "Only room owner can kick users" });
+    }
+    
+    const kicked = await removeUserFromRoomByUsername(roomId, username);
+    if (!kicked) return res.status(404).json({ error: "User not in room" });
+    
+    // Notify via socket
+    io.to(roomId).emit("user-kicked", { username, by: user.name });
+    
+    res.json({ ok: true, username });
+  } catch (error) {
+    console.error("Error kicking user:", error);
+    res.status(500).json({ error: "Failed to kick user" });
+  }
+});
+
+app.post("/api/rooms/:roomId/nurture", requireAuth, async (req, res) => {
+  try {
+    const { roomId } = req.params;
+    const { message } = req.body || {};
+    if (!message || typeof message !== "string" || !message.trim()) {
+      return res.status(400).json({ error: "message required" });
+    }
+    const user = await getUserById(req.session.userId);
+    const room = await getRoomById(roomId);
+    if (!room) return res.status(404).json({ error: "Room not found" });
+    const msg = await saveMessage(roomId, user?.name || "Team", message.trim(), null);
+    res.json(msg);
+  } catch (err) {
+    console.error("Nurture message error:", err);
+    res.status(500).json({ error: err.message || "Failed to send" });
   }
 });
 
@@ -837,7 +893,7 @@ app.post("/api/rooms/:roomId/invite", async (req, res) => {
     }
 
     const users = await getRoomUsers(roomId);
-    const isInRoom = users.some((u) => u.username === username);
+    const isInRoom = users.includes(username);
     if (!isInRoom) {
       return res.status(403).json({
         error: "You must be in the room to invite others",
@@ -1207,6 +1263,60 @@ app.get("/api/campaigns", requireAuth, async (req, res) => {
   }
 });
 
+app.get("/api/campaigns/analytics", requireAuth, async (req, res) => {
+  try {
+    const user = await getUserById(req.session.userId);
+    const analytics = await getCampaignAnalytics(user?.name);
+    res.json(analytics);
+  } catch (err) {
+    console.error("Campaign analytics error:", err);
+    res.status(500).json({ error: err.message || "Failed to get analytics" });
+  }
+});
+
+app.get("/api/leads/similar", requireAuth, async (req, res) => {
+  try {
+    const user = await getUserById(req.session.userId);
+    const limit = Math.min(parseInt(req.query.limit, 10) || 10, 50);
+    const leads = await getSimilarLeads(user?.name, req.session.userId, limit);
+    res.json(leads);
+  } catch (err) {
+    console.error("Similar leads error:", err);
+    res.status(500).json({ error: err.message || "Failed to get similar leads" });
+  }
+});
+
+app.get("/api/nurture/templates", requireAuth, async (req, res) => {
+  try {
+    const templates = await getNurtureTemplatesByUserId(req.session.userId);
+    res.json(templates);
+  } catch (err) {
+    console.error("Nurture templates error:", err);
+    res.status(500).json({ error: err.message || "Failed to get templates" });
+  }
+});
+
+app.post("/api/nurture/templates", requireAuth, async (req, res) => {
+  try {
+    const { name, channel, subject, body } = req.body || {};
+    const t = await createNurtureTemplate(req.session.userId, { name, channel, subject, body });
+    res.json({ id: t.id, name: t.name, channel: t.channel, subject: t.subject, body: t.body });
+  } catch (err) {
+    console.error("Create nurture template error:", err);
+    res.status(500).json({ error: err.message || "Failed to create template" });
+  }
+});
+
+app.delete("/api/nurture/templates/:id", requireAuth, async (req, res) => {
+  try {
+    await deleteNurtureTemplate(req.params.id, req.session.userId);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("Delete nurture template error:", err);
+    res.status(500).json({ error: err.message || "Failed to delete template" });
+  }
+});
+
 app.post("/api/campaigns", requireAuth, async (req, res) => {
   try {
     const user = await getUserById(req.session.userId);
@@ -1263,7 +1373,7 @@ app.delete("/api/campaigns/:id", requireAuth, async (req, res) => {
 app.get("/api/campaigns/:id/leads", requireAuth, async (req, res) => {
   try {
     const user = await getUserById(req.session.userId);
-    const { rooms, pending } = await getLeadsForCampaign(req.params.id, user?.name);
+    const { rooms, pending } = await getLeadsForCampaign(req.params.id, user?.name, req.session.userId);
     res.json({ rooms, pending });
   } catch (err) {
     console.error("Campaign leads error:", err);
@@ -1274,11 +1384,39 @@ app.get("/api/campaigns/:id/leads", requireAuth, async (req, res) => {
 app.get("/api/leads", requireAuth, async (req, res) => {
   try {
     const user = await getUserById(req.session.userId);
-    const { rooms, pending } = await getAllLeads(user?.name);
+    const { rooms, pending } = await getAllLeads(user?.name, req.session.userId);
     res.json({ rooms, pending });
   } catch (err) {
     console.error("Leads error:", err);
     res.status(500).json({ error: err.message || "Failed to get leads" });
+  }
+});
+
+// ICP – ideal customer profile
+app.get("/api/icp", requireAuth, async (req, res) => {
+  try {
+    const icp = await getIcpConfigByUserId(req.session.userId);
+    res.json(icp || { industry: "", companySize: "", role: "", needs: "", painPoints: "" });
+  } catch (err) {
+    console.error("ICP get error:", err);
+    res.status(500).json({ error: err.message || "Failed to get ICP" });
+  }
+});
+
+app.put("/api/icp", requireAuth, async (req, res) => {
+  try {
+    const { industry, companySize, role, needs, painPoints } = req.body || {};
+    const icp = await setIcpConfig(req.session.userId, {
+      industry,
+      companySize,
+      role,
+      needs,
+      painPoints,
+    });
+    res.json(icp);
+  } catch (err) {
+    console.error("ICP set error:", err);
+    res.status(500).json({ error: err.message || "Failed to save ICP" });
   }
 });
 
@@ -1383,7 +1521,7 @@ io.on("connection", async (socket) => {
       const users = await getRoomUsers(roomId);
       io.to(roomId).emit("room-update", {
         userCount: users.length,
-        users: users.map((u) => u.username),
+        users: users,
       });
     } catch (error) {
       console.error("Error joining room:", error);
@@ -1469,11 +1607,11 @@ io.on("connection", async (socket) => {
         maxUsers: room.maxUsers,
         createdByUsername: room.createdByUsername,
         messages,
-        users: users.map((u) => u.username),
+        users: users,
         userCount: users.length,
       });
       socket.to(pending.room_id).emit("user-joined", { username: pending.requester_username, userId: pending.requester_socket_id });
-      io.to(pending.room_id).emit("room-update", { userCount: users.length, users: users.map((u) => u.username) });
+      io.to(pending.room_id).emit("room-update", { userCount: users.length, users: users });
       await deletePendingJoinRequest(requestId);
     } catch (error) {
       console.error("Error accepting join request:", error);
@@ -1528,7 +1666,7 @@ io.on("connection", async (socket) => {
       io.to(removed.socket_id).emit("removed-from-room", { roomId, roomName: room.name });
       socket.to(roomId).emit("user-left", { username: targetUsername });
       const users = await getRoomUsers(roomId);
-      io.to(roomId).emit("room-update", { userCount: users.length, users: users.map((u) => u.username) });
+      io.to(roomId).emit("room-update", { userCount: users.length, users: users });
     } catch (error) {
       console.error("Error removing member:", error);
       socket.emit("error", { message: "Failed to remove member" });
@@ -1779,7 +1917,7 @@ io.on("connection", async (socket) => {
           const users = await getRoomUsers(roomId);
           io.to(roomId).emit("room-update", {
             userCount: users.length,
-            users: users.map((u) => u.username),
+            users: users,
           });
         }
 

@@ -47,6 +47,8 @@
   let showMembersList = false;
   let showInvitePanel = false;
   let showAssignPanel = false;
+  let showRoomSettings = false;
+  let settingsKicking = false;
   let inviteLinkValue = "";
   let inviteEmail = "";
   let assignInProgress = false;
@@ -150,6 +152,49 @@
       toast.classList.remove("show");
       setTimeout(() => document.body.removeChild(toast), 300);
     }, 3000);
+  }
+
+  async function toggleRoomStatus() {
+    const newStatus = room.status === "active" ? "inactive" : "active";
+    try {
+      const res = await fetch(`${config.serverUrl}/api/rooms/${room.id}/meta`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ status: newStatus }),
+      });
+      if (res.ok) {
+        room.status = newStatus;
+        playSuccess();
+        showToast(`Room ${newStatus === "active" ? "activated" : "deactivated"}`);
+        if (typeof onRoomMetaChange === "function") onRoomMetaChange();
+      }
+    } catch (e) {
+      showToast("Failed to update room status");
+    }
+  }
+
+  async function kickUser(username) {
+    if (!confirm(`Kick ${username} from this room?`)) return;
+    settingsKicking = true;
+    try {
+      const res = await fetch(`${config.serverUrl}/api/rooms/${room.id}/kick`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ username }),
+      });
+      const data = await safeParseJson(res) || {};
+      if (!res.ok) throw new Error(data.error || "Failed to kick user");
+      users = users.filter(u => u !== username);
+      userCount = users.length;
+      playSuccess();
+      showToast(`${username} has been kicked`);
+    } catch (e) {
+      showToast(e.message || "Failed to kick user");
+    } finally {
+      settingsKicking = false;
+    }
   }
 
   function copyInviteLink() {
@@ -383,6 +428,21 @@
     "On it",
     "Can we discuss?",
   ];
+
+  let currentRoomId = room.id;
+
+  // Clear messages and rejoin when room changes
+  $: if (room.id !== currentRoomId) {
+    currentRoomId = room.id;
+    messages = [];
+    users = [];
+    userCount = 0;
+    if (socket) {
+      removeSocketListeners();
+      joinRoom();
+      setupSocketListeners();
+    }
+  }
 
   onMount(() => {
     if (socket) {
@@ -1120,6 +1180,9 @@
     <div class="header-right">
       {#if room.createdByUsername === config.username}
         <button type="button" class="btn-invite-header" onclick={openInvitePanel} title="Invite" aria-label="Invite to room">Invite</button>
+        <button type="button" class="btn-settings-header" onclick={() => (showRoomSettings = !showRoomSettings)} title="Room settings" aria-label="Room settings">
+          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v6m0 6v6M1 12h6m6 0h6"/></svg>
+        </button>
       {/if}
       <div class="header-assign-wrap">
         {#if room.assignedTo && room.assignedTo.startsWith && room.assignedTo.startsWith('agent:')}
@@ -1268,6 +1331,66 @@
                 Detailed message
               </button>
             </div>
+          </section>
+        </div>
+      </div>
+    </div>
+  {/if}
+
+  {#if showRoomSettings}
+    <div
+      class="drawer-overlay"
+      role="dialog"
+      aria-label="Room settings"
+      tabindex="-1"
+      onclick={(e) => e.target === e.currentTarget && (showRoomSettings = false)}
+      onkeydown={(e) => e.key === "Escape" && (showRoomSettings = false)}
+    >
+      <div class="drawer-panel settings-drawer" role="region" aria-label="Room settings">
+        <div class="drawer-header">
+          <h3 class="drawer-title">Room Settings</h3>
+          <button type="button" class="drawer-close" onclick={() => (showRoomSettings = false)} aria-label="Close">×</button>
+        </div>
+        <div class="drawer-body">
+          <section class="settings-section">
+            <h4 class="settings-section-title">Room Status</h4>
+            <p class="settings-hint">Inactive rooms won't appear in active conversations list.</p>
+            <div class="settings-status-row">
+              <span class="settings-status-label">Status: <strong>{room.status === "active" ? "Active" : "Inactive"}</strong></span>
+              <button type="button" class="btn-toggle-status" onclick={toggleRoomStatus}>
+                {room.status === "active" ? "Deactivate Room" : "Activate Room"}
+              </button>
+            </div>
+          </section>
+
+          <section class="settings-section">
+            <h4 class="settings-section-title">Room Members ({userCount})</h4>
+            <p class="settings-hint">Manage users in this room. You can kick users who are disruptive.</p>
+            {#if users.length === 0}
+              <p class="settings-empty">No users currently in room.</p>
+            {:else}
+              <ul class="settings-members-list">
+                {#each users as username}
+                  <li class="settings-member-item">
+                    <span class="settings-member-name">{username}</span>
+                    {#if username !== config.username && username !== room.createdByUsername}
+                      <button type="button" class="btn-kick-user" disabled={settingsKicking} onclick={() => kickUser(username)}>
+                        Kick
+                      </button>
+                    {:else if username === room.createdByUsername}
+                      <span class="settings-member-badge">Owner</span>
+                    {:else}
+                      <span class="settings-member-badge">You</span>
+                    {/if}
+                  </li>
+                {/each}
+              </ul>
+            {/if}
+          </section>
+
+          <section class="settings-section">
+            <h4 class="settings-section-title">Room Code</h4>
+            <p class="settings-code">{room.code}</p>
           </section>
         </div>
       </div>
@@ -2099,7 +2222,8 @@
     gap: 0.5rem;
   }
 
-  .btn-invite-header {
+  .btn-invite-header,
+  .btn-settings-header {
     background: var(--navy-700);
     color: var(--white);
     border: none;
@@ -3886,5 +4010,122 @@
     :global(.toast-notification.show) {
       transform: translateY(0);
     }
+  }
+
+  .settings-section {
+    margin-bottom: 1.5rem;
+  }
+
+  .settings-section-title {
+    margin: 0 0 0.5rem;
+    font-size: 0.9375rem;
+    font-weight: 600;
+  }
+
+  .settings-hint {
+    margin: 0 0 1rem;
+    font-size: 0.8125rem;
+    color: var(--text-secondary);
+  }
+
+  .settings-status-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.75rem;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+  }
+
+  .settings-status-label {
+    font-size: 0.875rem;
+  }
+
+  .btn-toggle-status {
+    padding: 0.5rem 1rem;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--card-bg);
+    font-size: 0.8125rem;
+    font-weight: 500;
+    cursor: pointer;
+    font-family: inherit;
+  }
+
+  .btn-toggle-status:hover {
+    background: var(--gray-100);
+  }
+
+  .settings-empty {
+    padding: 1rem;
+    text-align: center;
+    color: var(--text-secondary);
+    font-size: 0.875rem;
+  }
+
+  .settings-members-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  .settings-member-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.75rem;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .settings-member-item:last-child {
+    border-bottom: none;
+  }
+
+  .settings-member-name {
+    font-size: 0.9375rem;
+    font-weight: 500;
+  }
+
+  .settings-member-badge {
+    padding: 0.25rem 0.5rem;
+    background: var(--gray-100);
+    color: var(--text-secondary);
+    font-size: 0.75rem;
+    border-radius: 4px;
+    font-weight: 500;
+  }
+
+  .btn-kick-user {
+    padding: 0.35rem 0.75rem;
+    border: 1px solid #ef4444;
+    border-radius: 6px;
+    background: var(--card-bg);
+    color: #ef4444;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    cursor: pointer;
+    font-family: inherit;
+  }
+
+  .btn-kick-user:hover:not(:disabled) {
+    background: #fef2f2;
+  }
+
+  .btn-kick-user:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .settings-code {
+    padding: 0.75rem 1rem;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 1.5rem;
+    font-weight: 700;
+    text-align: center;
+    letter-spacing: 0.1em;
+    font-family: monospace;
   }
 </style>

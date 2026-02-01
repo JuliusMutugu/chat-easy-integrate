@@ -63,6 +63,50 @@
     goTo("integrations");
   }
 
+  async function joinRoomByCode() {
+    const code = joinByCodeInput.trim();
+    if (!code) {
+      joinByCodeError = "Please enter a room code";
+      return;
+    }
+    joinByCodeLoading = true;
+    joinByCodeError = "";
+    try {
+      const res = await fetch(`${config.serverUrl}/api/rooms/code/${encodeURIComponent(code)}`, {
+        credentials: "include",
+      });
+      const data = await safeParseJson(res);
+      if (!res.ok) {
+        joinByCodeError = data?.error || "Room not found";
+        return;
+      }
+      // Emit join-room to ensure socket connection
+      socket.emit("join-room", {
+        roomId: data.id,
+        username: config.username,
+      });
+      currentRoom = {
+        id: data.id,
+        name: data.name,
+        description: data.description,
+        code: data.code,
+        maxUsers: data.maxUsers,
+        createdByUsername: data.createdByUsername,
+        userCount: data.userCount || 0,
+        users: [],
+      };
+      showJoinByCodeModal = false;
+      joinByCodeInput = "";
+      currentView = "rooms";
+      loadRooms();
+      addNotification("info", `Joined room: ${data.name}`, 5000);
+    } catch (e) {
+      joinByCodeError = e.message || "Failed to join room";
+    } finally {
+      joinByCodeLoading = false;
+    }
+  }
+
   let dashboardLastUpdated = "just now";
   let contactsFilter = "open";
   /** Inbox page: chats views (all, mine, unassigned, new-lead, hot-lead, payment, customer, team) or config pages (incoming-calls, ai-agents, campaigns, vip-clients) */
@@ -71,6 +115,10 @@
   let inboxSearch = "";
   let contextBarExpanded = false;
   let inboxTeamFilter = "";
+  let showJoinByCodeModal = false;
+  let joinByCodeInput = "";
+  let joinByCodeError = "";
+  let joinByCodeLoading = false;
   /** Whether Lifecycle sub-nav is open in the top tab bar */
   let lifecycleNavOpen = false;
   let teamsNavOpen = false;
@@ -275,8 +323,8 @@
     if (inboxPage === "team" && inboxTeamFilter) list = list.filter((r) => (r.teamName || "—") === inboxTeamFilter);
     if (inboxSort === "unreplied") list = list.filter((r) => r.lastMessageFromUsername && r.lastMessageFromUsername !== config.username);
     if (inboxSort === "newest") list = [...list].sort((a, b) => {
-      const at = a.lastMessageAt ? a.lastMessageAt.getTime() : (a.createdAt ? a.createdAt.getTime() : 0);
-      const bt = b.lastMessageAt ? b.lastMessageAt.getTime() : (b.createdAt ? b.createdAt.getTime() : 0);
+      const at = a.lastMessageAt ? (a.lastMessageAt instanceof Date ? a.lastMessageAt.getTime() : new Date(a.lastMessageAt).getTime()) : (a.createdAt ? (a.createdAt instanceof Date ? a.createdAt.getTime() : new Date(a.createdAt).getTime()) : 0);
+      const bt = b.lastMessageAt ? (b.lastMessageAt instanceof Date ? b.lastMessageAt.getTime() : new Date(b.lastMessageAt).getTime()) : (b.createdAt ? (b.createdAt instanceof Date ? b.createdAt.getTime() : new Date(b.createdAt).getTime()) : 0);
       return bt - at;
     });
     return list;
@@ -441,6 +489,11 @@
         clearInterval(invitePollTimer);
         invitePollTimer = null;
       }
+      // Ensure socket is in the room on client side
+      socket.emit("join-room", {
+        roomId: data.roomId,
+        username: config.username,
+      });
       currentRoom = {
         id: data.roomId,
         name: data.roomName,
@@ -454,6 +507,7 @@
       currentView = "rooms";
       if (typeof window !== "undefined") window.history.pushState({}, document.title, getPathFromState());
       pendingRequests = pendingRequests.filter((p) => p.roomId !== data.roomId);
+      loadRooms();
       addNotification("info", "You have been accepted into the room.", 5000);
     });
     socket.on("join-declined", () => {
@@ -1242,6 +1296,9 @@
               </div>
                   <div class="inbox-list-footer">
                     <button type="button" class="btn-inbox-create" onclick={handleCreateRoom}>Create room</button>
+                    <button type="button" class="btn-inbox-join-code" onclick={() => { showJoinByCodeModal = true; joinByCodeInput = ""; joinByCodeError = ""; }} aria-label="Join by code" title="Join by code">
+                      <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M3 12h12"/></svg>
+                    </button>
                     <button type="button" class="btn-inbox-pending" onclick={handleOpenPending} aria-label="Pending requests" title="Pending">
                       {#if pendingRequests.length > 0}<span class="inbox-pending-badge">{pendingRequests.length}</span>{/if}
                       <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>
@@ -1456,6 +1513,31 @@
     </aside>
   </div>
 
+  {#if showJoinByCodeModal}
+    <div class="modal-overlay" role="dialog" tabindex="-1" onkeydown={(e) => e.key === "Escape" && (showJoinByCodeModal = false)} onclick={(e) => e.target === e.currentTarget && (showJoinByCodeModal = false)}>
+      <div class="modal-content">
+        <h3 class="modal-title">Join room by code</h3>
+        <p class="modal-desc">Enter the room code to join directly.</p>
+        <input
+          type="text"
+          class="modal-input"
+          placeholder="Room code (e.g. ABC123)"
+          bind:value={joinByCodeInput}
+          onkeydown={(e) => e.key === "Enter" && joinRoomByCode()}
+        />
+        {#if joinByCodeError}
+          <p class="modal-error">{joinByCodeError}</p>
+        {/if}
+        <div class="modal-actions">
+          <button type="button" class="btn-modal-cancel" onclick={() => showJoinByCodeModal = false}>Cancel</button>
+          <button type="button" class="btn-modal-confirm" disabled={joinByCodeLoading} onclick={joinRoomByCode}>
+            {joinByCodeLoading ? "Joining..." : "Join"}
+          </button>
+        </div>
+      </div>
+    </div>
+  {/if}
+
   <Chatbot serverUrl={config.serverUrl} />
   </div>
 
@@ -1472,14 +1554,14 @@
   .layout {
     flex: 1;
     display: grid;
-    grid-template-columns: 64px 1fr 48px;
+    grid-template-columns: 220px 1fr 48px;
     overflow: hidden;
     height: 100vh;
     min-height: 100vh;
   }
 
   .layout-context-expanded {
-    grid-template-columns: 64px 1fr 280px;
+    grid-template-columns: 220px 1fr 280px;
   }
 
   .onboarding-backdrop {
@@ -1575,10 +1657,10 @@
   }
 
   .sidebar-respondio {
-    width: 64px;
-    min-width: 64px;
-    padding: 0.5rem 0;
-    align-items: center;
+    width: 220px;
+    min-width: 220px;
+    padding: 0.5rem 1rem;
+    align-items: stretch;
     background: var(--sidebar-bg, var(--navy-900));
     border-right-color: var(--sidebar-border, var(--navy-800));
     transition: background-color var(--duration-normal) var(--ease-in-out),
@@ -1627,11 +1709,15 @@
   .sidebar-respondio .sidebar-item {
     width: 100%;
     min-height: 44px;
-    padding: 0.5rem;
-    justify-content: center;
-    gap: 0;
+    padding: 0.625rem 1rem;
+    flex-direction: row;
+    justify-content: flex-start;
+    align-items: center;
+    gap: 0.875rem;
     border-radius: 10px;
     color: var(--sidebar-text);
+    text-align: left;
+    white-space: nowrap;
   }
 
   .sidebar-respondio .sidebar-item:hover {
@@ -1659,7 +1745,10 @@
   }
 
   .sidebar-respondio .sidebar-label {
-    display: none;
+    display: block;
+    font-size: 0.875rem;
+    font-weight: 500;
+    flex: 1;
   }
 
   .sidebar-respondio .sidebar-item-with-badge {
@@ -1823,6 +1912,8 @@
 
   .sidebar-label {
     flex: 1;
+    font-size: 0.8125rem;
+    font-weight: 500;
   }
 
   .sidebar-item:hover {
@@ -4405,5 +4496,117 @@
     .dashboard-rooms-section {
       padding: 0 1rem 1rem;
     }
+  }
+
+  .btn-inbox-join-code {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.4rem 0.75rem;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--card-bg);
+    color: var(--text-primary);
+    font-size: 0.8125rem;
+    font-weight: 500;
+    font-family: inherit;
+    cursor: pointer;
+  }
+
+  .btn-inbox-join-code:hover {
+    background: var(--gray-100);
+    border-color: var(--gray-300);
+  }
+
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
+  }
+
+  .modal-content {
+    background: var(--card-bg);
+    padding: 1.5rem;
+    border-radius: 12px;
+    min-width: 360px;
+    max-width: 90vw;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+  }
+
+  .modal-title {
+    margin: 0 0 0.5rem;
+    font-size: 1.125rem;
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+
+  .modal-desc {
+    margin: 0 0 1rem;
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+  }
+
+  .modal-input {
+    width: 100%;
+    padding: 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 0.9375rem;
+    font-family: inherit;
+    margin-bottom: 0.75rem;
+  }
+
+  .modal-error {
+    margin: 0 0 1rem;
+    padding: 0.5rem;
+    background: #fee;
+    color: #c33;
+    font-size: 0.8125rem;
+    border-radius: 6px;
+  }
+
+  .modal-actions {
+    display: flex;
+    gap: 0.75rem;
+    justify-content: flex-end;
+  }
+
+  .btn-modal-cancel,
+  .btn-modal-confirm {
+    padding: 0.5rem 1rem;
+    border-radius: 8px;
+    font-size: 0.875rem;
+    font-weight: 500;
+    font-family: inherit;
+    cursor: pointer;
+  }
+
+  .btn-modal-cancel {
+    border: 1px solid var(--border);
+    background: var(--card-bg);
+    color: var(--text-primary);
+  }
+
+  .btn-modal-cancel:hover {
+    background: var(--gray-100);
+  }
+
+  .btn-modal-confirm {
+    border: none;
+    background: var(--green-600);
+    color: var(--white);
+  }
+
+  .btn-modal-confirm:hover {
+    background: var(--green-700);
+  }
+
+  .btn-modal-confirm:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
   }
 </style>
