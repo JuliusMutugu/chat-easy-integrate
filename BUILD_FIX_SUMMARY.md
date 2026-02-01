@@ -8,7 +8,7 @@ sh: 1: vite: not found
 ==> Build failed 😞
 ```
 
-**Root Cause:** Client dependencies (including vite) weren't being installed properly in Render's build environment.
+**Root Cause:** In production mode, `npm ci` was skipping devDependencies. Since `vite` is in devDependencies (as it should be for a build tool), it wasn't being installed. Only 12 packages were installed instead of 46.
 
 ## 🔧 What Was Fixed
 

@@ -11,7 +11,7 @@
     "build": "npm run install:client && cd client && npm run build",
     "build:all": "npm run build && (fuser -k 3000/tcp 2>/dev/null; sleep 1; npm start)",
     "start": "node server/index.js",
-    "install:client": "cd client && npm ci --prefer-offline || npm install",
+    "install:client": "cd client && npm install --include=dev",
     "install-all": "npm install && npm run install:client"
   },
   "dependencies": {
