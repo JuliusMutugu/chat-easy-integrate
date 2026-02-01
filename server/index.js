@@ -99,8 +99,8 @@ const sessionMiddleware = session({
     secure: process.env.NODE_ENV === "production",
     httpOnly: true,
     maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-    sameSite: process.env.NODE_ENV === "production" ? "lax" : "lax", // Changed to 'lax' for same-origin
-    domain: process.env.NODE_ENV === "production" ? ".onrender.com" : undefined,
+    sameSite: "lax", // For same-origin requests
+    // No domain set - will use exact domain (chat-easy-integrate.onrender.com)
   },
 });
 
@@ -328,17 +328,26 @@ app.post("/api/auth/register", async (req, res) => {
     const passwordHash = await bcrypt.hash(password, 10);
     const user = await createUser(email, passwordHash, name, { isCustomer: !!isCustomer, isBusiness: !!isBusiness });
     req.session.userId = user.id;
-    await updateUserLastLogin(user.id);
-    res.json({
-      user: {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        isCustomer: user.isCustomer,
-        isBusiness: user.isBusiness,
-        kycStatus: user.kycStatus,
-      },
-      requiresKyc: user.isBusiness && user.kycStatus === "pending",
+    
+    // Force session save before sending response
+    req.session.save((err) => {
+      if (err) {
+        console.error("Session save error on register:", err);
+        return res.status(500).json({ error: "Session save failed" });
+      }
+      
+      updateUserLastLogin(user.id);
+      res.json({
+        user: {
+          id: user.id,
+          email: user.email,
+          name: user.name,
+          isCustomer: user.isCustomer,
+          isBusiness: user.isBusiness,
+          kycStatus: user.kycStatus,
+        },
+        requiresKyc: user.isBusiness && user.kycStatus === "pending",
+      });
     });
   } catch (error) {
     console.error("Register error:", error);
@@ -361,8 +370,17 @@ app.post("/api/auth/login", async (req, res) => {
       return res.status(401).json({ error: "Invalid email or password" });
     }
     req.session.userId = user.id;
-    await updateUserLastLogin(user.id);
-    res.json({ user: { id: user.id, email: user.email, name: user.name } });
+    
+    // Force session save before sending response  
+    req.session.save((err) => {
+      if (err) {
+        console.error("Session save error:", err);
+        return res.status(500).json({ error: "Session save failed" });
+      }
+      
+      updateUserLastLogin(user.id);
+      res.json({ user: { id: user.id, email: user.email, name: user.name } });
+    });
   } catch (error) {
     console.error("Login error:", error);
     res.status(500).json({ error: "Failed to login" });
