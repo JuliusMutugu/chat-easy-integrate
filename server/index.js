@@ -1,3 +1,4 @@
+import "dotenv/config";
 import express from "express";
 import { createServer } from "http";
 import { Server } from "socket.io";
@@ -379,6 +380,47 @@ app.post("/api/rooms/:roomId/invite", async (req, res) => {
   }
 });
 
+// Send room invitation by email (uses Integrations email config)
+app.post("/api/rooms/:roomId/invite/send-email", async (req, res) => {
+  try {
+    const { roomId } = req.params;
+    const { to } = req.body || {};
+    const serverUrl = `${req.protocol}://${req.get("host")}`;
+    const toEmail = typeof to === "string" ? to.trim() : "";
+    if (!toEmail) {
+      return res.status(400).json({ error: "to (email address) is required" });
+    }
+
+    const room = await getRoomById(roomId);
+    if (!room) return res.status(404).json({ error: "Room not found" });
+
+    const inviteLink = room.inviteToken
+      ? `${serverUrl}/?invite=${room.inviteToken}`
+      : "";
+    const config = await getEmailConfig();
+    const valid = validateEmailConfig(config);
+    if (!valid.valid) {
+      return res.status(400).json({ error: valid.error || "Email not configured. Configure in Integrations." });
+    }
+
+    const subject = `You're invited to join ${room.name}`;
+    const html = buildInviteEmailHtml({
+      roomName: room.name,
+      roomDescription: room.description ?? "",
+      roomCode: room.code ?? "",
+      inviteLink,
+      serverUrl,
+    });
+    const text = `You're invited to join "${room.name}".\n\nRoom code: ${room.code ?? ""}\nJoin here: ${inviteLink}\n\n${room.description ? room.description + "\n\n" : ""}Open the link above to join the conversation.`;
+
+    await sendEmail(config, { to: toEmail, subject, text, html });
+    res.json({ ok: true, message: "Invitation email sent" });
+  } catch (err) {
+    console.error("Error sending invite email:", err);
+    res.status(500).json({ error: err.message || "Failed to send invitation email" });
+  }
+});
+
 // Document upload (room-scoped)
 app.post("/api/rooms/:roomId/upload", upload.single("file"), async (req, res) => {
   try {
@@ -397,6 +439,114 @@ app.post("/api/rooms/:roomId/upload", upload.single("file"), async (req, res) =>
 // ---------- Channels API (our own engine: Email, SMS, WhatsApp – no Twilio) ----------
 function getServerBaseUrl(req) {
   return `${req.protocol}://${req.get("host")}`;
+}
+
+/** Escape for HTML text content */
+function escapeHtml(s) {
+  if (s == null) return "";
+  const str = String(s);
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+/** Beautiful HTML email template for room invitation */
+function buildInviteEmailHtml({ roomName, roomDescription, roomCode, inviteLink, serverUrl }) {
+  const name = escapeHtml(roomName);
+  const desc = escapeHtml(roomDescription);
+  const code = escapeHtml(roomCode);
+  const logoUrl = process.env.INVITE_EMAIL_LOGO_URL || "";
+  const appName = process.env.INVITE_EMAIL_APP_NAME || "Nego";
+
+  return `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>You're invited</title>
+</head>
+<body style="margin:0;padding:0;background-color:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color:#f1f5f9;padding:32px 16px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:560px;background-color:#ffffff;border-radius:16px;box-shadow:0 4px 24px rgba(0,0,0,0.08);overflow:hidden;">
+          <tr>
+            <td style="padding:40px 40px 24px;text-align:center;background:linear-gradient(135deg,#0f172a 0%,#1e293b 100%);">
+              ${logoUrl
+                ? `<img src="${escapeHtml(logoUrl)}" alt="${escapeHtml(appName)}" width="56" height="56" style="display:inline-block;width:56px;height:56px;border-radius:12px;object-fit:contain;" />`
+                : `<div style="display:inline-block;width:56px;height:56px;border-radius:14px;background:rgba(255,255,255,0.2);padding:14px;box-sizing:border-box;"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="display:block;"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>`}
+              <p style="margin:16px 0 0;font-size:13px;font-weight:600;letter-spacing:0.05em;text-transform:uppercase;color:rgba(255,255,255,0.8);">${escapeHtml(appName)}</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:32px 40px;">
+              <h1 style="margin:0 0 8px;font-size:24px;font-weight:700;color:#0f172a;line-height:1.3;">You're invited</h1>
+              <p style="margin:0 0 24px;font-size:16px;color:#64748b;line-height:1.5;">Someone invited you to join a conversation.</p>
+              <table role="presentation" cellspacing="0" cellpadding="0" style="width:100%;background:#f8fafc;border-radius:12px;border:1px solid #e2e8f0;">
+                <tr>
+                  <td style="padding:20px;">
+                    <p style="margin:0 0 4px;font-size:12px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:0.04em;">Room</p>
+                    <p style="margin:0;font-size:18px;font-weight:700;color:#0f172a;">${name}</p>
+                    ${desc ? `<p style="margin:12px 0 0;font-size:14px;color:#475569;line-height:1.5;">${desc}</p>` : ""}
+                  </td>
+                </tr>
+              </table>
+              <table role="presentation" cellspacing="0" cellpadding="0" style="margin:28px 0 0;">
+                <tr>
+                  <td style="border-radius:10px;background:linear-gradient(135deg,#059669 0%,#047857 100%);box-shadow:0 4px 14px rgba(5,150,105,0.4);">
+                    <a href="${escapeHtml(inviteLink)}" target="_blank" rel="noopener" style="display:inline-block;padding:16px 32px;font-size:16px;font-weight:600;color:#ffffff;text-decoration:none;line-height:1;">Join conversation</a>
+                  </td>
+                </tr>
+              </table>
+              ${code ? `<p style="margin:24px 0 0;font-size:13px;color:#94a3b8;">Or use room code: <strong style="color:#0f172a;">${code}</strong></p>` : ""}
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:24px 40px 32px;border-top:1px solid #e2e8f0;">
+              <p style="margin:0;font-size:12px;color:#94a3b8;line-height:1.5;">This invitation was sent via ${escapeHtml(appName)}. If you didn't expect this email, you can ignore it.</p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+}
+
+/** Strip surrounding single/double quotes from env values (e.g. SMTP_PASS="mypass" → mypass) */
+function stripEnvQuotes(val) {
+  if (val == null || typeof val !== "string") return val;
+  const s = val.trim();
+  if ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'"))) {
+    return s.slice(1, -1);
+  }
+  return s;
+}
+
+/** Email config: DB (Integrations) merged with .env SMTP_*; env string values are quote-stripped. */
+async function getEmailConfig() {
+  const fromDb = (await getChannelConfig("email"))?.config || {};
+  const fromEnv = {
+    host: process.env.SMTP_HOST,
+    port: process.env.SMTP_PORT,
+    secure: process.env.SMTP_SECURE,
+    user: process.env.SMTP_USER,
+    pass: process.env.SMTP_PASS,
+    from: process.env.SMTP_FROM,
+  };
+  const merged = { ...fromDb };
+  for (const [k, v] of Object.entries(fromEnv)) {
+    if (v !== undefined && v !== "") {
+      if (k === "port") merged[k] = parseInt(v, 10) || merged[k];
+      else if (k === "secure") merged[k] = v === "true" || v === "1";
+      else merged[k] = stripEnvQuotes(String(v));
+    }
+  }
+  return merged;
 }
 
 const CHANNEL_NAMES = ["email", "sms", "whatsapp", "identity", "payments"];
@@ -435,7 +585,7 @@ app.post("/api/channels/email/send", async (req, res) => {
   try {
     const { to, subject, text, html } = req.body || {};
     if (!to) return res.status(400).json({ error: "to is required" });
-    const { config } = (await getChannelConfig("email")) || {};
+    const config = await getEmailConfig();
     const valid = validateEmailConfig(config);
     if (!valid.valid) return res.status(400).json({ error: valid.error || "Email not configured" });
     const result = await sendEmail(config, { to, subject, text, html });

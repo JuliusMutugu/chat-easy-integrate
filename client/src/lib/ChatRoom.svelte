@@ -27,6 +27,13 @@
   let mentionListEl;
   let showQuickReplies = false;
   let showCustomSnippets = false;
+  let snippetShow = false;
+  let snippetQuery = "";
+  let emojiShow = false;
+  let emojiQuery = "";
+  let showEmojiPicker = false;
+  let emailSending = false;
+  let emailError = "";
   let greetingDismissed = false;
   let showDealPanel = false;
   let showCalculator = false;
@@ -74,10 +81,23 @@
     playClick();
   }
 
+  function showToast(message) {
+    const toast = document.createElement("div");
+    toast.className = "toast-notification";
+    toast.textContent = message;
+    document.body.appendChild(toast);
+    setTimeout(() => toast.classList.add("show"), 100);
+    setTimeout(() => {
+      toast.classList.remove("show");
+      setTimeout(() => document.body.removeChild(toast), 300);
+    }, 3000);
+  }
+
   function copyInviteLink() {
     if (inviteLinkValue) {
       navigator.clipboard.writeText(inviteLinkValue);
       playSuccess();
+      showToast("Invite link copied.");
     }
   }
 
@@ -85,6 +105,7 @@
     if (room.code) {
       navigator.clipboard.writeText(String(room.code));
       playSuccess();
+      showToast("Room code copied.");
     }
   }
 
@@ -100,41 +121,48 @@
         room.inviteToken = data.inviteToken;
         inviteLinkValue = typeof window !== "undefined" ? `${window.location.origin}?invite=${data.inviteToken}` : "";
         playSuccess();
+        showToast("New invite link generated.");
       }
     } catch (_) {}
   }
 
-  function sendEmailInvite() {
+  async function sendEmailInvite() {
     if (!inviteEmail.trim() || !inviteLinkValue) return;
-    const subject = `Join ${room.name} - Room Code: ${room.code ?? ""}`;
-    const body = `You're invited to join "${room.name}".
-
-Quick join:
-- Room Code: ${room.code ?? ""}
-- Direct Link: ${inviteLinkValue}
-
-Description: ${room.description ?? ""}
-
-How to join:
-1. Visit the platform
-2. Enter room code: ${room.code ?? ""}
-3. Or use the direct link above.`;
-    const mailtoLink = `mailto:${inviteEmail.trim()}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-    window.open(mailtoLink);
-    inviteEmail = "";
-    playSuccess();
+    emailError = "";
+    emailSending = true;
+    try {
+      const res = await fetch(`${config.serverUrl}/api/rooms/${room.id}/invite/send-email`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ to: inviteEmail.trim() }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        emailError = data.error || "Failed to send email";
+        return;
+      }
+      inviteEmail = "";
+      playSuccess();
+      showToast("Invitation email sent.");
+    } catch (e) {
+      emailError = e.message || "Network error";
+    } finally {
+      emailSending = false;
+    }
   }
 
   function copySimpleMessage() {
     const text = `Join "${room.name}" - Room Code: ${room.code ?? ""}`;
     navigator.clipboard.writeText(text);
     playSuccess();
+    showToast("Message copied.");
   }
 
   function copyDetailedMessage() {
     const text = `You're invited to "${room.name}". Code: ${room.code ?? ""}. Link: ${inviteLinkValue}. ${room.description ?? ""}`;
     navigator.clipboard.writeText(text);
     playSuccess();
+    showToast("Detailed message copied.");
   }
 
   function openSuggestEdit(msg) {
@@ -425,6 +453,8 @@ How to join:
     newMessage = "";
     replyingTo = null;
     mentionShow = false;
+    snippetShow = false;
+    emojiShow = false;
     showQuickReplies = false;
     showCustomSnippets = false;
   }
@@ -478,18 +508,37 @@ How to join:
   }
 
   function handleMessageInput() {
-    const lastAt = newMessage.lastIndexOf("@");
-    if (lastAt === -1) {
-      mentionShow = false;
-      return;
+    const text = newMessage;
+    const lastAt = text.lastIndexOf("@");
+    const lastSlash = text.lastIndexOf("/");
+    const lastColon = text.lastIndexOf(":");
+    const cursorPos = messageInputEl ? messageInputEl.selectionStart : text.length;
+
+    mentionShow = false;
+    snippetShow = false;
+    emojiShow = false;
+
+    if (lastAt !== -1) {
+      const afterAt = text.slice(lastAt + 1);
+      if (!/\s/.test(afterAt) && (cursorPos === undefined || cursorPos >= lastAt)) {
+        mentionShow = true;
+        mentionQuery = afterAt.toLowerCase();
+      }
     }
-    const afterAt = newMessage.slice(lastAt + 1);
-    if (/\s/.test(afterAt)) {
-      mentionShow = false;
-      return;
+    if (lastSlash !== -1 && (cursorPos === undefined || cursorPos >= lastSlash)) {
+      const afterSlash = text.slice(lastSlash + 1);
+      if (!/\s/.test(afterSlash) && afterSlash.indexOf("\n") === -1) {
+        snippetShow = true;
+        snippetQuery = afterSlash.toLowerCase();
+      }
     }
-    mentionShow = true;
-    mentionQuery = afterAt.toLowerCase();
+    if (lastColon !== -1 && (cursorPos === undefined || cursorPos >= lastColon)) {
+      const afterColon = text.slice(lastColon + 1);
+      if (!/\s/.test(afterColon) && afterColon.indexOf("\n") === -1) {
+        emojiShow = true;
+        emojiQuery = afterColon.toLowerCase();
+      }
+    }
   }
 
   $: mentionCandidates = users.filter(
@@ -503,6 +552,73 @@ How to join:
     newMessage = newMessage.slice(0, lastAt) + "@" + username + " ";
     mentionShow = false;
     mentionQuery = "";
+  }
+
+  const EMOJI_SHORTCODES = [
+    { code: "smile", char: "😊" },
+    { code: "grin", char: "😁" },
+    { code: "heart", char: "❤️" },
+    { code: "thumbsup", char: "👍" },
+    { code: "thumbsdown", char: "👎" },
+    { code: "ok", char: "👌" },
+    { code: "wave", char: "👋" },
+    { code: "clap", char: "👏" },
+    { code: "check", char: "✅" },
+    { code: "x", char: "❌" },
+    { code: "fire", char: "🔥" },
+    { code: "star", char: "⭐" },
+    { code: "eyes", char: "👀" },
+    { code: "thinking", char: "🤔" },
+    { code: "cool", char: "😎" },
+    { code: "sad", char: "😢" },
+    { code: "laugh", char: "😂" },
+    { code: "party", char: "🎉" },
+    { code: "rocket", char: "🚀" },
+  ];
+
+  $: snippetCandidates = (() => {
+    if (!snippetShow) return [];
+    const custom = getCustomSnippets();
+    const q = snippetQuery.toLowerCase();
+    const byName = custom.filter(
+      (s) =>
+        (s.name || "").toLowerCase().includes(q) ||
+        (s.body || "").toLowerCase().includes(q)
+    );
+    const byQuick = QUICK_REPLIES.filter((t) => t.toLowerCase().includes(q));
+    const snippetItems = byName.map((s) => ({ type: "snippet", name: s.name, body: s.body }));
+    const quickItems = byQuick.map((t) => ({ type: "quick", name: t, body: t }));
+    return [...snippetItems, ...quickItems].slice(0, 8);
+  })();
+
+  $: emojiCandidates = emojiShow
+    ? EMOJI_SHORTCODES.filter(
+        (e) => !emojiQuery || e.code.toLowerCase().startsWith(emojiQuery)
+      ).slice(0, 8)
+    : [];
+
+  function insertSnippetAtSlash(body) {
+    const lastSlash = newMessage.lastIndexOf("/");
+    newMessage = newMessage.slice(0, lastSlash) + body + " ";
+    snippetShow = false;
+    snippetQuery = "";
+    showQuickReplies = false;
+    showCustomSnippets = false;
+    playClick();
+  }
+
+  function insertEmojiAtColon(char) {
+    const lastColon = newMessage.lastIndexOf(":");
+    newMessage = newMessage.slice(0, lastColon) + char + " ";
+    emojiShow = false;
+    emojiQuery = "";
+    playClick();
+  }
+
+  function insertEmojiFromPicker(char) {
+    newMessage = newMessage + char;
+    showEmojiPicker = false;
+    playClick();
   }
 
   function formatMessageBody(text) {
@@ -592,9 +708,21 @@ How to join:
   }
 
   function handleInputKeydown(event) {
-    if (mentionShow && mentionCandidates.length > 0) {
-      if (event.key === "Escape") {
+    if (event.key === "Escape") {
+      if (mentionShow) {
         mentionShow = false;
+        event.preventDefault();
+      }
+      if (snippetShow) {
+        snippetShow = false;
+        event.preventDefault();
+      }
+      if (emojiShow) {
+        emojiShow = false;
+        event.preventDefault();
+      }
+      if (showEmojiPicker) {
+        showEmojiPicker = false;
         event.preventDefault();
       }
     }
@@ -605,10 +733,9 @@ How to join:
     const isEnter = event.key === "Enter";
     const isCtrlEnter = event.ctrlKey && isEnter;
 
-    if (mentionShow && mentionCandidates.length > 0 && isEnter) {
-      if (event.key === "Escape") return;
-      return;
-    }
+    if (mentionShow && mentionCandidates.length > 0 && isEnter) return;
+    if (snippetShow && snippetCandidates.length > 0 && isEnter) return;
+    if (emojiShow && emojiCandidates.length > 0 && isEnter) return;
 
     if (enterToSend) {
       if (isEnter && !event.shiftKey) {
@@ -857,6 +984,7 @@ How to join:
 
           <section class="invite-section-block">
             <h4 class="invite-section-title">Email invitation</h4>
+            <p class="invite-hint small">Invitation is sent via your configured email (Integrations).</p>
             <div class="invite-email-row">
               <input
                 type="email"
@@ -864,16 +992,20 @@ How to join:
                 placeholder="Enter email address"
                 class="invite-email-input"
                 id="invite-email-input"
+                disabled={emailSending}
               />
               <button
                 type="button"
                 class="btn-copy btn-copy-email"
                 onclick={sendEmailInvite}
-                disabled={!inviteEmail.trim() || !inviteLinkValue}
+                disabled={!inviteEmail.trim() || !inviteLinkValue || emailSending}
               >
-                Send
+                {emailSending ? "Sending…" : "Send email"}
               </button>
             </div>
+            {#if emailError}
+              <p class="invite-email-error" role="alert">{emailError}</p>
+            {/if}
           </section>
 
           <section class="invite-section-block">
@@ -1335,67 +1467,76 @@ How to join:
         <button type="button" class="replying-to-cancel" onclick={cancelReply} aria-label="Cancel reply">Cancel</button>
       </div>
     {/if}
-    <div class="input-channel-row">
+
+    <div class="input-toolbar">
       <select class="input-channel-select" aria-label="Channel">
         <option value="nego">Nego</option>
         <option value="whatsapp">WhatsApp</option>
       </select>
+      <div class="input-toolbar-group">
+        <button
+          type="button"
+          class="btn-toolbar"
+          onclick={() => { showQuickReplies = false; showCustomSnippets = !showCustomSnippets; }}
+          title="Snippets (or type /)"
+          aria-expanded={showCustomSnippets}
+          aria-haspopup="true"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+          <span>Snippets</span>
+        </button>
+        <button
+          type="button"
+          class="btn-toolbar"
+          onclick={() => { showEmojiPicker = !showEmojiPicker; playClick(); }}
+          title="Emoji (or type :)"
+          aria-expanded={showEmojiPicker}
+        >
+          <span class="emoji-toolbar-icon">😊</span>
+          <span>Emoji</span>
+        </button>
+        <button type="button" class="btn-toolbar btn-toolbar-location" onclick={shareLocation} title="Share location">
+          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+          <span>Location</span>
+        </button>
+      </div>
+      <button type="button" class="btn-send" onclick={sendMessage} disabled={!newMessage.trim()}>Send</button>
     </div>
+
+    {#if showCustomSnippets}
+      <div class="quick-replies-dropdown input-dropdown-snippets" role="menu">
+        {#if getCustomSnippets().length > 0}
+          {#each getCustomSnippets() as s}
+            <button type="button" class="quick-reply-option" role="menuitem" onclick={() => insertCustomSnippet(s.body)}>
+              <span class="snippet-option-name">{s.name}</span>
+              {#if s.body.length > 40}<span class="snippet-option-preview">{s.body.slice(0, 40)}…</span>{/if}
+            </button>
+          {/each}
+        {/if}
+        <div class="snippet-quick-divider">Quick replies</div>
+        {#each QUICK_REPLIES as text}
+          <button type="button" class="quick-reply-option" role="menuitem" onclick={() => insertQuickReply(text)}>{text}</button>
+        {/each}
+        {#if getCustomSnippets().length === 0}
+          <div class="snippets-empty">Add custom snippets in Settings.</div>
+        {/if}
+      </div>
+    {/if}
+
+    {#if showEmojiPicker}
+      <div class="emoji-picker-grid" role="listbox">
+        {#each EMOJI_SHORTCODES as e}
+          <button type="button" class="emoji-picker-btn" role="option" aria-selected="false" onclick={() => insertEmojiFromPicker(e.char)} title={e.code}>{e.char}</button>
+        {/each}
+      </div>
+    {/if}
+
     <div class="input-row input-row-wrap">
       <div class="input-with-mentions">
-        <div class="quick-replies-wrap">
-          <button
-            type="button"
-            class="btn-quick-replies btn-quick-replies-icon"
-            onclick={() => { showCustomSnippets = false; showQuickReplies = !showQuickReplies; }}
-            title="Quick replies"
-            aria-expanded={showQuickReplies}
-            aria-haspopup="true"
-            aria-label="Quick replies"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-            <span class="btn-quick-replies-label">Quick replies</span>
-          </button>
-          <button
-            type="button"
-            class="btn-quick-replies btn-quick-replies-icon"
-            onclick={() => { showQuickReplies = false; showCustomSnippets = !showCustomSnippets; }}
-            title="Custom snippets"
-            aria-expanded={showCustomSnippets}
-            aria-haspopup="true"
-            aria-label="Custom snippets"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
-            <span class="btn-quick-replies-label">Snippets</span>
-          </button>
-          {#if showQuickReplies}
-            <div class="quick-replies-dropdown" role="menu">
-              {#each QUICK_REPLIES as text}
-                <button type="button" class="quick-reply-option" role="menuitem" onclick={() => insertQuickReply(text)}>
-                  {text}
-                </button>
-              {/each}
-            </div>
-          {/if}
-          {#if showCustomSnippets}
-            <div class="quick-replies-dropdown snippets-dropdown" role="menu">
-              {#each getCustomSnippets() as s}
-                <button type="button" class="quick-reply-option" role="menuitem" onclick={() => insertCustomSnippet(s.body)}>
-                  <span class="snippet-option-name">{s.name}</span>
-                  {#if s.body.length > 40}
-                    <span class="snippet-option-preview">{s.body.slice(0, 40)}…</span>
-                  {/if}
-                </button>
-              {:else}
-                <div class="snippets-empty">No custom snippets. Add them in Settings.</div>
-              {/each}
-            </div>
-          {/if}
-        </div>
         <textarea
           bind:this={messageInputEl}
           bind:value={newMessage}
-          placeholder="Use '/' for snippets, '$' for variables, ':' for emoji. Type your message..."
+          placeholder="Type your message… @mention, /snippet, :emoji"
           rows="1"
           oninput={handleMessageInput}
           onkeydown={handleInputKeydown}
@@ -1404,22 +1545,35 @@ How to join:
         {#if mentionShow && mentionCandidates.length > 0}
           <div class="mention-dropdown" bind:this={mentionListEl} role="listbox">
             {#each mentionCandidates.slice(0, 5) as user}
-              <button type="button" class="mention-option" role="option" aria-selected="false" onclick={() => insertMention(user)}>
-                {user}
+              <button type="button" class="mention-option" role="option" aria-selected="false" onclick={() => insertMention(user)}>{user}</button>
+            {/each}
+          </div>
+        {/if}
+        {#if snippetShow && snippetCandidates.length > 0}
+          <div class="mention-dropdown snippet-dropdown" role="listbox">
+            {#each snippetCandidates as item}
+              <button type="button" class="mention-option" role="option" aria-selected="false" onclick={() => insertSnippetAtSlash(item.body)}>
+                <span class="snippet-option-name">{item.name}</span>
+                {#if item.body.length > 35}<span class="snippet-option-preview">{item.body.slice(0, 35)}…</span>{/if}
+              </button>
+            {/each}
+          </div>
+        {/if}
+        {#if emojiShow && emojiCandidates.length > 0}
+          <div class="mention-dropdown emoji-dropdown" role="listbox">
+            {#each emojiCandidates as e}
+              <button type="button" class="mention-option emoji-option" role="option" aria-selected="false" onclick={() => insertEmojiAtColon(e.char)} title={e.code}>
+                <span class="emoji-char">{e.char}</span>
+                <span class="emoji-code">:{e.code}</span>
               </button>
             {/each}
           </div>
         {/if}
       </div>
-      <div class="input-actions-row">
-        <button type="button" class="btn-add-comment" title="Add comment" aria-label="Add comment">Add comment</button>
-        <button type="button" class="btn-location btn-location-icon" onclick={shareLocation} title="Share location" aria-label="Share location">
-          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
-        </button>
-        <button type="button" class="btn-send" onclick={sendMessage} disabled={!newMessage.trim()}>Send</button>
-      </div>
     </div>
+
     <div class="input-respondio-footer">
+      <span class="input-footer-label">AI</span>
       <button type="button" class="btn-ai-assist" title="AI Assist" aria-label="AI Assist">AI Assist</button>
       <button type="button" class="btn-summarize" title="Summarize" aria-label="Summarize">Summarize</button>
     </div>
@@ -1768,6 +1922,17 @@ How to join:
   .invite-email-input:focus {
     outline: none;
     border-color: var(--green-600);
+  }
+
+  .invite-hint.small {
+    margin: 0 0 0.5rem;
+    font-size: 0.8125rem;
+  }
+
+  .invite-email-error {
+    margin: 0.5rem 0 0;
+    font-size: 0.8125rem;
+    color: var(--red-600, #dc2626);
   }
 
   .btn-copy-email {
@@ -2479,8 +2644,55 @@ How to join:
     transition: background-color var(--duration-normal) var(--ease-in-out);
   }
 
-  .input-channel-row {
+  .input-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
     margin-bottom: 0.5rem;
+  }
+
+  .input-toolbar-group {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+  }
+
+  .btn-toolbar {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.4rem 0.65rem;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--card-bg);
+    color: var(--text-primary);
+    font-size: 0.8125rem;
+    font-weight: 500;
+    cursor: pointer;
+    font-family: inherit;
+    transition: background-color 0.15s ease, border-color 0.15s ease;
+  }
+
+  .btn-toolbar:hover {
+    background: var(--gray-100);
+    border-color: var(--gray-300);
+  }
+
+  .btn-toolbar span:first-of-type:not(.emoji-toolbar-icon) {
+    display: none;
+  }
+
+  @media (min-width: 420px) {
+    .btn-toolbar span { display: inline; }
+  }
+
+  .emoji-toolbar-icon {
+    font-size: 1.125rem;
+  }
+
+  .btn-toolbar-location {
+    color: var(--green-700);
   }
 
   .input-channel-select {
@@ -2516,13 +2728,90 @@ How to join:
     color: var(--text-primary);
   }
 
+  .input-dropdown-snippets {
+    margin-bottom: 0.5rem;
+    position: relative;
+    min-width: 200px;
+  }
+
+  .snippet-quick-divider {
+    padding: 0.35rem 0.75rem;
+    font-size: 0.6875rem;
+    font-weight: 700;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    border-top: 1px solid var(--border);
+    margin-top: 0.25rem;
+    padding-top: 0.5rem;
+  }
+
+  .emoji-picker-grid {
+    display: grid;
+    grid-template-columns: repeat(8, 1fr);
+    gap: 0.25rem;
+    padding: 0.5rem;
+    margin-bottom: 0.5rem;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    max-width: 280px;
+  }
+
+  .emoji-picker-btn {
+    width: 2rem;
+    height: 2rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    background: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 1.25rem;
+    transition: background-color 0.15s ease;
+  }
+
+  .emoji-picker-btn:hover {
+    background: var(--gray-200);
+  }
+
+  .snippet-dropdown .snippet-option-name,
+  .snippet-dropdown .snippet-option-preview {
+    display: block;
+  }
+
+  .emoji-dropdown .emoji-option {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .emoji-char {
+    font-size: 1.25rem;
+  }
+
+  .emoji-code {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+  }
+
   .input-respondio-footer {
     display: flex;
     align-items: center;
-    gap: 0.75rem;
+    gap: 0.5rem;
     margin-top: 0.5rem;
     padding-top: 0.5rem;
     border-top: 1px solid var(--border);
+  }
+
+  .input-footer-label {
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-right: 0.25rem;
   }
 
   .btn-ai-assist,
@@ -2769,21 +3058,6 @@ How to join:
     gap: 0.375rem;
   }
 
-  .btn-quick-replies-icon {
-    padding: 0.5rem;
-    border-radius: 10px;
-  }
-
-  .btn-quick-replies-icon .btn-quick-replies-label {
-    display: none;
-  }
-
-  @media (min-width: 420px) {
-    .btn-quick-replies-icon .btn-quick-replies-label {
-      display: inline;
-    }
-  }
-
   .btn-quick-replies:hover {
     background: var(--gray-200);
     border-color: var(--gray-300);
@@ -2938,6 +3212,26 @@ How to join:
     50% { opacity: 0.4; }
   }
 
+  :global(.toast-notification) {
+    position: fixed;
+    top: 1.5rem;
+    right: 1.5rem;
+    background: var(--navy-800);
+    color: var(--white);
+    padding: 0.75rem 1.25rem;
+    border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+    z-index: 3000;
+    font-size: 0.875rem;
+    font-weight: 500;
+    transform: translateX(120%);
+    transition: transform 0.3s var(--ease-out-expo);
+  }
+
+  :global(.toast-notification.show) {
+    transform: translateX(0);
+  }
+
   @media (max-width: 768px) {
     .chat-header {
       padding: 0.75rem 1rem;
@@ -2959,6 +3253,16 @@ How to join:
 
     .input-area {
       padding: 0.75rem 1rem;
+    }
+
+    :global(.toast-notification) {
+      right: 1rem;
+      left: 1rem;
+      transform: translateY(-100%);
+    }
+
+    :global(.toast-notification.show) {
+      transform: translateY(0);
     }
   }
 </style>
