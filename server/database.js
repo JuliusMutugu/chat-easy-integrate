@@ -215,10 +215,32 @@ export async function initDatabase() {
         email TEXT UNIQUE NOT NULL,
         password_hash TEXT NOT NULL,
         name TEXT NOT NULL,
+        is_customer BOOLEAN DEFAULT FALSE,
+        is_business BOOLEAN DEFAULT FALSE,
+        kyc_status TEXT DEFAULT 'none',
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         last_login DATETIME
       );
       CREATE INDEX IF NOT EXISTS idx_users_email ON users (email);
+
+      CREATE TABLE IF NOT EXISTS kyc_verifications (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT NOT NULL,
+        business_name TEXT NOT NULL,
+        business_registration_number TEXT,
+        business_address TEXT,
+        business_type TEXT,
+        contact_phone TEXT,
+        tax_id TEXT,
+        documents_json TEXT,
+        status TEXT DEFAULT 'pending',
+        submitted_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        reviewed_at DATETIME,
+        reviewer_notes TEXT,
+        FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+      );
+      CREATE INDEX IF NOT EXISTS idx_kyc_user ON kyc_verifications (user_id);
+      CREATE INDEX IF NOT EXISTS idx_kyc_status ON kyc_verifications (status);
     `);
 
     console.log("✅ Database initialized successfully");
@@ -637,22 +659,26 @@ function generateUserId() {
   return "u-" + Date.now() + "-" + Math.random().toString(36).slice(2, 11);
 }
 
-export async function createUser(email, passwordHash, name) {
+export async function createUser(email, passwordHash, name, { isCustomer = false, isBusiness = false } = {}) {
   const userId = generateUserId();
+  const kycStatus = isBusiness ? "pending" : "none";
   await db.run(
-    "INSERT INTO users (id, email, password_hash, name) VALUES (?, ?, ?, ?)",
-    [userId, email.toLowerCase().trim(), passwordHash, name.trim()]
+    "INSERT INTO users (id, email, password_hash, name, is_customer, is_business, kyc_status) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    [userId, email.toLowerCase().trim(), passwordHash, name.trim(), isCustomer ? 1 : 0, isBusiness ? 1 : 0, kycStatus]
   );
   return getUserById(userId);
 }
 
 export async function getUserById(userId) {
-  const user = await db.get("SELECT id, email, name, created_at, last_login FROM users WHERE id = ?", [userId]);
+  const user = await db.get("SELECT * FROM users WHERE id = ?", [userId]);
   if (!user) return null;
   return {
     id: user.id,
     email: user.email,
     name: user.name,
+    isCustomer: !!user.is_customer,
+    isBusiness: !!user.is_business,
+    kycStatus: user.kyc_status || "none",
     createdAt: user.created_at ? new Date(user.created_at) : null,
     lastLogin: user.last_login ? new Date(user.last_login) : null,
   };
@@ -666,6 +692,9 @@ export async function getUserByEmail(email) {
     email: user.email,
     name: user.name,
     passwordHash: user.password_hash,
+    isCustomer: !!user.is_customer,
+    isBusiness: !!user.is_business,
+    kycStatus: user.kyc_status || "none",
     createdAt: user.created_at ? new Date(user.created_at) : null,
     lastLogin: user.last_login ? new Date(user.last_login) : null,
   };
@@ -673,6 +702,53 @@ export async function getUserByEmail(email) {
 
 export async function updateUserLastLogin(userId) {
   await db.run("UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = ?", [userId]);
+}
+
+export async function updateUserKycStatus(userId, status) {
+  await db.run("UPDATE users SET kyc_status = ? WHERE id = ?", [status, userId]);
+}
+
+/** KYC Verifications */
+export async function submitKyc(userId, data) {
+  const { businessName, registrationNumber, address, businessType, contactPhone, taxId, documents } = data;
+  await db.run(
+    `INSERT INTO kyc_verifications (user_id, business_name, business_registration_number, business_address, business_type, contact_phone, tax_id, documents_json)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [userId, businessName, registrationNumber || null, address || null, businessType || null, contactPhone || null, taxId || null, documents ? JSON.stringify(documents) : null]
+  );
+  await updateUserKycStatus(userId, "submitted");
+  return getKycByUserId(userId);
+}
+
+export async function getKycByUserId(userId) {
+  const kyc = await db.get("SELECT * FROM kyc_verifications WHERE user_id = ? ORDER BY submitted_at DESC LIMIT 1", [userId]);
+  if (!kyc) return null;
+  return {
+    id: kyc.id,
+    userId: kyc.user_id,
+    businessName: kyc.business_name,
+    registrationNumber: kyc.business_registration_number,
+    address: kyc.business_address,
+    businessType: kyc.business_type,
+    contactPhone: kyc.contact_phone,
+    taxId: kyc.tax_id,
+    documents: kyc.documents_json ? JSON.parse(kyc.documents_json) : null,
+    status: kyc.status,
+    submittedAt: kyc.submitted_at ? new Date(kyc.submitted_at) : null,
+    reviewedAt: kyc.reviewed_at ? new Date(kyc.reviewed_at) : null,
+    reviewerNotes: kyc.reviewer_notes,
+  };
+}
+
+export async function updateKycStatus(kycId, status, reviewerNotes = null) {
+  await db.run(
+    "UPDATE kyc_verifications SET status = ?, reviewed_at = CURRENT_TIMESTAMP, reviewer_notes = ? WHERE id = ?",
+    [status, reviewerNotes, kycId]
+  );
+  const kyc = await db.get("SELECT user_id FROM kyc_verifications WHERE id = ?", [kycId]);
+  if (kyc) {
+    await updateUserKycStatus(kyc.user_id, status);
+  }
 }
 
 export async function getRoomMessages(roomId, limit = 50) {

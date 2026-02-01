@@ -42,11 +42,18 @@
     }
   }
 
-  function handleAuthSuccess(authenticatedUser) {
+  function handleAuthSuccess(authenticatedUser, options = {}) {
     user = authenticatedUser;
     config.username = authenticatedUser.name;
     showModule = true;
-    window.history.pushState({}, "", "/dashboard");
+    
+    // If user signed up from an invite, redirect to inbox so they can request access
+    if (options?.inviteToken && inviteRoom) {
+      // They came from invite - go to inbox to see pending request
+      window.history.pushState({}, "", "/inbox");
+    } else {
+      window.history.pushState({}, "", "/dashboard");
+    }
   }
   let inviteRoom = null;
   let inviteToken = null;
@@ -297,7 +304,7 @@
     Loading...
   </div>
 {:else if showModule && !user}
-  <Auth mode="login" onSuccess={handleAuthSuccess} serverUrl={config.serverUrl} />
+  <Auth mode="login" onSuccess={handleAuthSuccess} serverUrl={config.serverUrl} {inviteToken} />
 {:else if showModule}
   <div class="app-full">
     <MessagingModule {config} {inviteRoom} {inviteToken} {user} onClose={handleClose} />

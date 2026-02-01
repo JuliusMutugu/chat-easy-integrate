@@ -52,6 +52,9 @@ import {
   getUserById,
   getUserByEmail,
   updateUserLastLogin,
+  submitKyc,
+  getKycByUserId,
+  updateKycStatus,
 } from "./database.js";
 import { sendEmail, validateEmailConfig } from "./channels/email.js";
 import { sendSms, sendSmsDev, validateSmsConfig } from "./channels/sms.js";
@@ -186,22 +189,35 @@ app.get("/api/health", (req, res) => {
 // Auth routes
 app.post("/api/auth/register", async (req, res) => {
   try {
-    const { email, password, name } = req.body;
+    const { email, password, name, isCustomer, isBusiness } = req.body;
     if (!email || !password || !name) {
       return res.status(400).json({ error: "Email, password, and name are required" });
     }
     if (password.length < 6) {
       return res.status(400).json({ error: "Password must be at least 6 characters" });
     }
+    if (!isCustomer && !isBusiness) {
+      return res.status(400).json({ error: "Please select at least one account type (Customer or Business)" });
+    }
     const existing = await getUserByEmail(email);
     if (existing) {
       return res.status(400).json({ error: "Email already registered" });
     }
     const passwordHash = await bcrypt.hash(password, 10);
-    const user = await createUser(email, passwordHash, name);
+    const user = await createUser(email, passwordHash, name, { isCustomer: !!isCustomer, isBusiness: !!isBusiness });
     req.session.userId = user.id;
     await updateUserLastLogin(user.id);
-    res.json({ user: { id: user.id, email: user.email, name: user.name } });
+    res.json({
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        isCustomer: user.isCustomer,
+        isBusiness: user.isBusiness,
+        kycStatus: user.kycStatus,
+      },
+      requiresKyc: user.isBusiness && user.kycStatus === "pending",
+    });
   } catch (error) {
     console.error("Register error:", error);
     res.status(500).json({ error: "Failed to register" });
@@ -250,10 +266,82 @@ app.get("/api/auth/me", async (req, res) => {
       req.session.destroy();
       return res.status(401).json({ error: "User not found" });
     }
-    res.json({ user: { id: user.id, email: user.email, name: user.name } });
+    const kyc = user.isBusiness ? await getKycByUserId(user.id) : null;
+    res.json({
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        isCustomer: user.isCustomer,
+        isBusiness: user.isBusiness,
+        kycStatus: user.kycStatus,
+      },
+      kyc: kyc ? { status: kyc.status, businessName: kyc.businessName } : null,
+      requiresKyc: user.isBusiness && (user.kycStatus === "pending" || user.kycStatus === "none"),
+    });
   } catch (error) {
     console.error("Get user error:", error);
     res.status(500).json({ error: "Failed to get user" });
+  }
+});
+
+// KYC endpoints
+app.post("/api/kyc/submit", requireAuth, async (req, res) => {
+  try {
+    const user = await getUserById(req.session.userId);
+    if (!user) {
+      return res.status(401).json({ error: "User not found" });
+    }
+    if (!user.isBusiness) {
+      return res.status(400).json({ error: "KYC is only required for business accounts" });
+    }
+    const existingKyc = await getKycByUserId(user.id);
+    if (existingKyc && existingKyc.status === "approved") {
+      return res.status(400).json({ error: "KYC already approved" });
+    }
+    if (existingKyc && existingKyc.status === "submitted") {
+      return res.status(400).json({ error: "KYC already submitted and pending review" });
+    }
+    const { businessName, registrationNumber, address, businessType, contactPhone, taxId } = req.body;
+    if (!businessName) {
+      return res.status(400).json({ error: "Business name is required" });
+    }
+    const kyc = await submitKyc(user.id, {
+      businessName,
+      registrationNumber,
+      address,
+      businessType,
+      contactPhone,
+      taxId,
+    });
+    res.json({ kyc, message: "KYC submitted successfully. We will review your information." });
+  } catch (error) {
+    console.error("KYC submit error:", error);
+    res.status(500).json({ error: "Failed to submit KYC" });
+  }
+});
+
+app.get("/api/kyc/status", requireAuth, async (req, res) => {
+  try {
+    const user = await getUserById(req.session.userId);
+    if (!user) {
+      return res.status(401).json({ error: "User not found" });
+    }
+    const kyc = await getKycByUserId(user.id);
+    res.json({
+      kycStatus: user.kycStatus,
+      kyc: kyc ? {
+        status: kyc.status,
+        businessName: kyc.businessName,
+        submittedAt: kyc.submittedAt,
+        reviewedAt: kyc.reviewedAt,
+        reviewerNotes: kyc.reviewerNotes,
+      } : null,
+      requiresKyc: user.isBusiness && (user.kycStatus === "pending" || user.kycStatus === "none"),
+    });
+  } catch (error) {
+    console.error("KYC status error:", error);
+    res.status(500).json({ error: "Failed to get KYC status" });
   }
 });
 

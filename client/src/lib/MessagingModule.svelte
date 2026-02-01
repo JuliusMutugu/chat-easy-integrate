@@ -36,8 +36,10 @@
   onMount(() => {
     connectToServer();
     applyPath(typeof window !== "undefined" ? window.location.pathname : "/dashboard");
-    if (inviteRoom) {
-      currentView = "dashboard";
+    // If user came with an invite, go to inbox so they can request access
+    if (inviteRoom && inviteToken) {
+      currentView = "rooms";
+      inboxPage = "all";
     }
     window.addEventListener("popstate", onPopState);
     addNotification("welcome", `Welcome back, ${config.username}`, 30000);
@@ -756,9 +758,21 @@
         </button>
         {#if profileDropdownOpen}
           <div class="header-profile-dropdown" role="menu">
+            <div class="header-profile-user-info">
+              <span class="header-profile-user-name">{user?.name || config.username}</span>
+              {#if user?.email}<span class="header-profile-user-email">{user.email}</span>{/if}
+              {#if user?.isCustomer || user?.isBusiness}
+                <div class="header-profile-badges">
+                  {#if user.isCustomer}<span class="header-profile-badge badge-customer">Customer</span>{/if}
+                  {#if user.isBusiness}<span class="header-profile-badge badge-business">Business</span>{/if}
+                </div>
+              {/if}
+            </div>
+            <div class="header-profile-divider"></div>
             <button type="button" class="header-profile-item" role="menuitem" onclick={() => { profileDropdownOpen = false; goTo('settings'); }}>Manage profile</button>
             <button type="button" class="header-profile-item" role="menuitem" onclick={() => { profileDropdownOpen = false; goTo('settings'); }}>Manage account</button>
-            <button type="button" class="header-profile-item header-profile-signout" role="menuitem" onclick={() => { profileDropdownOpen = false; onClose(); }}>Sign out</button>
+            <div class="header-profile-divider"></div>
+            <button type="button" class="header-profile-item header-profile-signout" role="menuitem" onclick={() => { profileDropdownOpen = false; handleLogout(); }}>Log out</button>
           </div>
         {/if}
       </div>
@@ -4061,6 +4075,56 @@
     box-shadow: 0 10px 32px rgba(0, 0, 0, 0.12);
     padding: 0.5rem 0;
     z-index: 100;
+  }
+
+  .header-profile-user-info {
+    padding: 0.75rem 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+
+  .header-profile-user-name {
+    font-weight: 600;
+    color: var(--text-primary);
+    font-size: 0.9375rem;
+  }
+
+  .header-profile-user-email {
+    font-size: 0.8125rem;
+    color: var(--text-secondary);
+  }
+
+  .header-profile-badges {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 0.375rem;
+  }
+
+  .header-profile-badge {
+    display: inline-block;
+    padding: 0.125rem 0.5rem;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.025em;
+    border-radius: 4px;
+  }
+
+  .badge-customer {
+    background: var(--blue-100, #dbeafe);
+    color: var(--blue-700, #1d4ed8);
+  }
+
+  .badge-business {
+    background: var(--purple-100, #f3e8ff);
+    color: var(--purple-700, #7e22ce);
+  }
+
+  .header-profile-divider {
+    height: 1px;
+    background: var(--border);
+    margin: 0.375rem 0;
   }
 
   .header-profile-item {
