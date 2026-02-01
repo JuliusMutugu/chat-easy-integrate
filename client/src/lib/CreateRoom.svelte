@@ -1,4 +1,6 @@
 <script>
+  import { playClick, playSuccess } from "./theme.js";
+
   export let config = {};
   export let onRoomCreated = () => {};
   export let onBack = () => {};
@@ -13,31 +15,29 @@
 
   async function handleSubmit(event) {
     event.preventDefault();
-
     if (!formData.name.trim()) {
-      error = "Room name is required";
+      error = "Room name is required.";
       return;
     }
-
     isSubmitting = true;
     error = null;
-
     try {
       const response = await fetch(`${config.serverUrl}/api/rooms`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(formData),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...formData,
+          createdBy: config.username || undefined,
+        }),
       });
-
       if (response.ok) {
+        playSuccess();
         onRoomCreated();
       } else {
-        error = "Failed to create room";
+        error = "Failed to create room.";
       }
     } catch (err) {
-      error = "Network error occurred";
+      error = "Network error.";
     } finally {
       isSubmitting = false;
     }
@@ -45,21 +45,21 @@
 </script>
 
 <div class="create-room">
-  <div class="create-room-header">
-    <button class="back-btn" onclick={onBack}>← Back</button>
-    <h3>🏠 Create New Room</h3>
-  </div>
+  <header class="header">
+    <button type="button" class="btn-back" onclick={() => { playClick(); onBack(); }}>Back</button>
+    <h3 class="title">Create room</h3>
+  </header>
 
-  <div class="create-room-content">
-    <form onsubmit={handleSubmit}>
+  <div class="content">
+    <form onsubmit={handleSubmit} class="form">
       {#if error}
-        <div class="error-message">
-          ⚠️ {error}
+        <div class="error-banner" role="alert">
+          {error}
         </div>
       {/if}
 
-      <div class="form-group">
-        <label for="roomName">Room Name *</label>
+      <div class="field">
+        <label for="roomName">Room name</label>
         <input
           id="roomName"
           type="text"
@@ -70,20 +70,20 @@
         />
       </div>
 
-      <div class="form-group">
+      <div class="field">
         <label for="roomDescription">Description</label>
         <textarea
           id="roomDescription"
           bind:value={formData.description}
-          placeholder="Describe what this room is for..."
+          placeholder="What is this room for?"
           rows="3"
           maxlength="200"
         ></textarea>
-        <small>{formData.description.length}/200 characters</small>
+        <small>{formData.description.length}/200</small>
       </div>
 
-      <div class="form-group">
-        <label for="maxUsers">Maximum Users</label>
+      <div class="field">
+        <label for="maxUsers">Maximum users</label>
         <input
           id="maxUsers"
           type="number"
@@ -91,28 +91,28 @@
           min="2"
           max="50"
         />
-        <small>Between 2 and 50 users</small>
+        <small>Between 2 and 50</small>
       </div>
 
-      <div class="form-actions">
-        <button type="button" class="cancel-btn" onclick={onBack}>
+      <div class="actions">
+        <button type="button" class="btn-cancel" onclick={() => { playClick(); onBack(); }}>
           Cancel
         </button>
-        <button type="submit" class="submit-btn" disabled={isSubmitting}>
-          {isSubmitting ? "⏳ Creating..." : "✨ Create Room"}
+        <button type="submit" class="btn-submit" disabled={isSubmitting}>
+          {isSubmitting ? "Creating..." : "Create room"}
         </button>
       </div>
     </form>
 
-    <div class="tips">
-      <h4>💡 Tips for great rooms:</h4>
+    <aside class="tips">
+      <h4>Tips</h4>
       <ul>
         <li>Use clear, descriptive names</li>
         <li>Set appropriate user limits</li>
         <li>Describe the purpose or topic</li>
-        <li>Keep it friendly and inclusive</li>
+        <li>Keep it focused</li>
       </ul>
-    </div>
+    </aside>
   </div>
 </div>
 
@@ -123,158 +123,181 @@
     flex-direction: column;
   }
 
-  .create-room-header {
-    padding: 20px;
-    border-bottom: 1px solid #e1e5e9;
+  .header {
+    padding: 1rem 1.5rem;
+    border-bottom: 1px solid var(--border);
     display: flex;
     align-items: center;
-    gap: 15px;
+    gap: 1rem;
+    flex-shrink: 0;
   }
 
-  .back-btn {
-    background: #f5f5f5;
-    border: 1px solid #ddd;
+  .btn-back {
+    background: var(--gray-100);
+    border: 1px solid var(--border);
     border-radius: 8px;
-    padding: 8px 12px;
+    padding: 0.5rem 1rem;
     cursor: pointer;
-    transition: all 0.3s;
-    font-size: 14px;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: var(--gray-700);
+    font-family: inherit;
+    transition: background-color 0.15s ease, border-color 0.15s ease;
   }
 
-  .back-btn:hover {
-    background: #e9e9e9;
-    transform: translateX(-2px);
+  .btn-back:hover {
+    background: var(--gray-200);
+    border-color: var(--gray-300);
   }
 
-  .create-room-header h3 {
+  .title {
     margin: 0;
-    color: #333;
-    font-size: 1.3em;
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: var(--navy-900);
   }
 
-  .create-room-content {
+  .content {
     flex: 1;
-    padding: 20px;
+    padding: 1.5rem;
     overflow-y: auto;
     display: grid;
-    grid-template-columns: 1fr 300px;
-    gap: 30px;
+    grid-template-columns: 1fr 280px;
+    gap: 2rem;
     align-items: start;
   }
 
-  form {
-    background: white;
-    border: 1px solid #e1e5e9;
+  .form {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    transition: box-shadow 0.25s ease, background-color var(--duration-normal) var(--ease-in-out);
     border-radius: 12px;
-    padding: 30px;
+    padding: 1.5rem;
+    transition: box-shadow 0.25s ease;
   }
 
-  .error-message {
-    background: #ffebee;
-    color: #c62828;
-    padding: 12px;
+  .form:focus-within {
+    box-shadow: 0 0 0 2px var(--green-100);
+  }
+
+  .error-banner {
+    background: var(--gray-100);
+    color: var(--gray-900);
+    padding: 0.75rem 1rem;
     border-radius: 8px;
-    margin-bottom: 20px;
-    font-size: 14px;
-  }
-
-  .form-group {
-    margin-bottom: 20px;
-  }
-
-  .form-group label {
-    display: block;
-    margin-bottom: 8px;
+    margin-bottom: 1.25rem;
+    font-size: 0.875rem;
     font-weight: 500;
-    color: #333;
+    border: 1px solid var(--gray-300);
   }
 
-  .form-group input,
-  .form-group textarea {
+  .field {
+    margin-bottom: 1.25rem;
+  }
+
+  .field:last-of-type {
+    margin-bottom: 0;
+  }
+
+  .field label {
+    display: block;
+    margin-bottom: 0.375rem;
+    font-weight: 600;
+    font-size: 0.875rem;
+    color: var(--navy-900);
+  }
+
+  .field input,
+  .field textarea {
     width: 100%;
-    padding: 12px;
-    border: 2px solid #e1e5e9;
+    padding: 0.75rem 1rem;
+    border: 2px solid var(--border);
     border-radius: 8px;
-    font-size: 14px;
-    transition: border-color 0.3s;
+    font-size: 0.9375rem;
     font-family: inherit;
+    transition: border-color 0.15s ease;
   }
 
-  .form-group input:focus,
-  .form-group textarea:focus {
+  .field input:focus,
+  .field textarea:focus {
     outline: none;
-    border-color: #667eea;
+    border-color: var(--green-600);
   }
 
-  .form-group textarea {
+  .field textarea {
     resize: vertical;
     min-height: 80px;
   }
 
-  .form-group small {
+  .field small {
     display: block;
-    margin-top: 5px;
-    color: #666;
-    font-size: 12px;
+    margin-top: 0.25rem;
+    color: var(--gray-500);
+    font-size: 0.75rem;
   }
 
-  .form-actions {
+  .actions {
     display: flex;
-    gap: 15px;
-    margin-top: 30px;
+    gap: 1rem;
+    margin-top: 1.5rem;
   }
 
-  .cancel-btn {
+  .btn-cancel {
     flex: 1;
-    background: white;
-    border: 2px solid #e1e5e9;
-    color: #666;
-    padding: 12px 20px;
+    background: var(--white);
+    border: 2px solid var(--border);
+    color: var(--gray-700);
+    padding: 0.75rem 1.25rem;
     border-radius: 8px;
     cursor: pointer;
-    font-weight: 500;
-    transition: all 0.3s;
+    font-weight: 600;
+    font-size: 0.9375rem;
+    font-family: inherit;
+    transition: background-color 0.15s ease, border-color 0.15s ease;
   }
 
-  .cancel-btn:hover {
-    border-color: #ccc;
-    background: #f9f9f9;
+  .btn-cancel:hover {
+    border-color: var(--gray-300);
+    background: var(--gray-50);
   }
 
-  .submit-btn {
+  .btn-submit {
     flex: 2;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    color: white;
+    background: var(--green-600);
+    color: var(--white);
     border: none;
-    padding: 12px 20px;
+    padding: 0.75rem 1.25rem;
     border-radius: 8px;
     cursor: pointer;
-    font-weight: 500;
-    transition: all 0.3s;
+    font-weight: 600;
+    font-size: 0.9375rem;
+    font-family: inherit;
+    transition: background-color 0.15s ease, transform 0.2s var(--ease-spring);
   }
 
-  .submit-btn:hover:not(:disabled) {
-    transform: translateY(-2px);
-    box-shadow: 0 8px 20px rgba(102, 126, 234, 0.4);
+  .btn-submit:hover:not(:disabled) {
+    background: var(--green-700);
+    transform: translateY(-1px);
   }
 
-  .submit-btn:disabled {
+  .btn-submit:disabled {
     opacity: 0.7;
     cursor: not-allowed;
     transform: none;
   }
 
   .tips {
-    background: #f8f9fa;
+    background: var(--bg-secondary);
     border-radius: 12px;
-    padding: 20px;
-    height: fit-content;
+    padding: 1.25rem;
+    border: 1px solid var(--border);
   }
 
   .tips h4 {
-    margin: 0 0 15px 0;
-    color: #333;
-    font-size: 1em;
+    margin: 0 0 0.75rem;
+    font-size: 0.9375rem;
+    font-weight: 600;
+    color: var(--navy-900);
   }
 
   .tips ul {
@@ -284,35 +307,41 @@
   }
 
   .tips li {
-    padding: 8px 0;
-    color: #666;
-    font-size: 14px;
-    border-bottom: 1px solid #e9ecef;
+    padding: 0.5rem 0;
+    color: var(--gray-600);
+    font-size: 0.875rem;
+    border-bottom: 1px solid var(--border);
+    position: relative;
+    padding-left: 1.25rem;
   }
 
   .tips li:last-child {
     border-bottom: none;
   }
 
-  .tips li:before {
-    content: "✓";
-    color: #4caf50;
-    font-weight: bold;
-    margin-right: 10px;
+  .tips li::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0.75rem;
+    width: 6px;
+    height: 6px;
+    background: var(--green-600);
+    border-radius: 50%;
   }
 
   @media (max-width: 768px) {
-    .create-room-content {
+    .content {
       grid-template-columns: 1fr;
-      gap: 20px;
-      padding: 15px;
+      gap: 1.5rem;
+      padding: 1rem;
     }
 
-    form {
-      padding: 20px;
+    .form {
+      padding: 1.25rem;
     }
 
-    .form-actions {
+    .actions {
       flex-direction: column;
     }
   }

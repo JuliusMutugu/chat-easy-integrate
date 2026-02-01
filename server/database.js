@@ -25,9 +25,22 @@ export async function initDatabase() {
         name TEXT NOT NULL,
         description TEXT,
         max_users INTEGER DEFAULT 10,
+        created_by_username TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         is_negotiation_active BOOLEAN DEFAULT FALSE
       );
+
+      CREATE TABLE IF NOT EXISTS pending_join_requests (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        room_id TEXT NOT NULL,
+        requester_username TEXT NOT NULL,
+        requester_socket_id TEXT NOT NULL,
+        status TEXT DEFAULT 'pending',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (room_id) REFERENCES rooms (id) ON DELETE CASCADE
+      );
+      CREATE INDEX IF NOT EXISTS idx_pending_join_room ON pending_join_requests (room_id);
+      CREATE INDEX IF NOT EXISTS idx_pending_join_socket ON pending_join_requests (requester_socket_id);
 
       CREATE TABLE IF NOT EXISTS room_messages (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -75,6 +88,39 @@ export async function initDatabase() {
       CREATE INDEX IF NOT EXISTS idx_room_users_room_id ON room_users (room_id);
       CREATE INDEX IF NOT EXISTS idx_room_users_socket_id ON room_users (socket_id);
     `);
+
+    const tableInfo = await db.all("PRAGMA table_info(room_messages)");
+    const hasReplyTo = tableInfo.some((c) => c.name === "reply_to_message_id");
+    if (!hasReplyTo) {
+      await db.exec(
+        "ALTER TABLE room_messages ADD COLUMN reply_to_message_id INTEGER REFERENCES room_messages(id)"
+      );
+    }
+
+    const roomsInfo = await db.all("PRAGMA table_info(rooms)");
+    const hasCreatedBy = roomsInfo.some((c) => c.name === "created_by_username");
+    if (!hasCreatedBy) {
+      await db.exec("ALTER TABLE rooms ADD COLUMN created_by_username TEXT");
+    }
+
+    const pendingExists = await db.get(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='pending_join_requests'"
+    );
+    if (!pendingExists) {
+      await db.exec(`
+        CREATE TABLE pending_join_requests (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          room_id TEXT NOT NULL,
+          requester_username TEXT NOT NULL,
+          requester_socket_id TEXT NOT NULL,
+          status TEXT DEFAULT 'pending',
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (room_id) REFERENCES rooms (id) ON DELETE CASCADE
+        );
+        CREATE INDEX idx_pending_join_room ON pending_join_requests (room_id);
+        CREATE INDEX idx_pending_join_socket ON pending_join_requests (requester_socket_id);
+      `);
+    }
 
     console.log("✅ Database initialized successfully");
     return db;
@@ -134,7 +180,7 @@ export async function generateInviteToken() {
 
 // Room operations
 export async function createRoom(
-  { name, description, maxUsers = 10 },
+  { name, description, maxUsers = 10, createdByUsername },
   serverUrl
 ) {
   const roomId = generateUUID();
@@ -142,9 +188,9 @@ export async function createRoom(
   const inviteToken = await generateInviteToken();
   const inviteLink = `${serverUrl}/invite/${inviteToken}`;
 
-  const result = await db.run(
-    "INSERT INTO rooms (id, code, invite_token, name, description, max_users) VALUES (?, ?, ?, ?, ?, ?)",
-    [roomId, code, inviteToken, name, description, maxUsers]
+  await db.run(
+    "INSERT INTO rooms (id, code, invite_token, name, description, max_users, created_by_username) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    [roomId, code, inviteToken, name, description, maxUsers, createdByUsername ?? null]
   );
 
   return {
@@ -154,6 +200,7 @@ export async function createRoom(
     name,
     description,
     maxUsers,
+    createdByUsername: createdByUsername ?? null,
     inviteLink,
     userCount: 0,
     createdAt: new Date(),
@@ -176,6 +223,7 @@ export async function getRoomById(roomId) {
     name: room.name,
     description: room.description,
     maxUsers: room.max_users,
+    createdByUsername: room.created_by_username ?? null,
     userCount: userCount.count,
     createdAt: new Date(room.created_at),
     isNegotiationActive: room.is_negotiation_active,
@@ -215,6 +263,7 @@ export async function getAllRooms() {
         name: room.name,
         description: room.description,
         maxUsers: room.max_users,
+        createdByUsername: room.created_by_username ?? null,
         userCount: userCount.count,
         createdAt: new Date(room.created_at),
         isNegotiationActive: room.is_negotiation_active,
@@ -293,11 +342,52 @@ export async function getUserBySocketId(socketId) {
   return user;
 }
 
-// Message operations
-export async function saveMessage(roomId, username, message) {
+export async function getRoomUserByUsername(roomId, username) {
+  return db.get(
+    "SELECT * FROM room_users WHERE room_id = ? AND username = ?",
+    [roomId, username]
+  );
+}
+
+/** Remove a user from a room by username (e.g. creator removing a member). */
+export async function removeUserFromRoomByUsername(roomId, username) {
+  const user = await getRoomUserByUsername(roomId, username);
+  if (!user) return null;
+  return removeUserFromRoom(user.socket_id);
+}
+
+/** Get socket_id of the room creator (if they are currently in the room). */
+export async function getCreatorSocketIdInRoom(roomId) {
+  const room = await db.get("SELECT created_by_username FROM rooms WHERE id = ?", [roomId]);
+  if (!room || !room.created_by_username) return null;
+  const creator = await getRoomUserByUsername(roomId, room.created_by_username);
+  return creator ? creator.socket_id : null;
+}
+
+// Pending join requests (invite-link flow: requester waits for creator to accept/decline)
+export async function addPendingJoinRequest(roomId, requesterUsername, requesterSocketId) {
   const result = await db.run(
-    "INSERT INTO room_messages (room_id, username, message) VALUES (?, ?, ?)",
-    [roomId, username, message]
+    "INSERT INTO pending_join_requests (room_id, requester_username, requester_socket_id, status) VALUES (?, ?, ?, 'pending')",
+    [roomId, requesterUsername, requesterSocketId]
+  );
+  return result.lastID;
+}
+
+export async function getPendingJoinRequest(requestId) {
+  return db.get("SELECT * FROM pending_join_requests WHERE id = ? AND status = 'pending'", [
+    requestId,
+  ]);
+}
+
+export async function deletePendingJoinRequest(requestId) {
+  await db.run("DELETE FROM pending_join_requests WHERE id = ?", [requestId]);
+}
+
+// Message operations
+export async function saveMessage(roomId, username, message, replyToMessageId = null) {
+  const result = await db.run(
+    "INSERT INTO room_messages (room_id, username, message, reply_to_message_id) VALUES (?, ?, ?, ?)",
+    [roomId, username, message, replyToMessageId]
   );
 
   return {
@@ -305,6 +395,7 @@ export async function saveMessage(roomId, username, message) {
     roomId,
     username,
     message,
+    replyToMessageId: replyToMessageId ?? undefined,
     timestamp: new Date(),
   };
 }
@@ -315,12 +406,32 @@ export async function getRoomMessages(roomId, limit = 50) {
     [roomId, limit]
   );
 
-  return messages.reverse().map((msg) => ({
-    id: msg.id,
-    username: msg.username,
-    message: msg.message,
-    timestamp: new Date(msg.timestamp),
-  }));
+  return messages.reverse().map((msg) => {
+    let message = msg.message;
+    let type = "text";
+    let location = undefined;
+    try {
+      const parsed = JSON.parse(msg.message);
+      if (!parsed) return { id: msg.id, username: msg.username, message, type, replyToMessageId: msg.reply_to_message_id ?? undefined, timestamp: new Date(msg.timestamp) };
+      if (typeof parsed.location !== "undefined") {
+        type = "location";
+        message = parsed.text;
+        location = parsed.location;
+      } else if (parsed.type === "announcement") {
+        type = "announcement";
+        message = parsed.text || parsed.message || message;
+      }
+    } catch (_) {}
+    return {
+      id: msg.id,
+      username: msg.username,
+      message,
+      type,
+      location,
+      replyToMessageId: msg.reply_to_message_id ?? undefined,
+      timestamp: new Date(msg.timestamp),
+    };
+  });
 }
 
 // Utility function for UUID generation

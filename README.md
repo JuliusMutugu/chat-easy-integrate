@@ -185,6 +185,10 @@ The components use CSS custom properties that can be overridden:
 
 Extend functionality by modifying the Svelte components in `client/src/lib/`.
 
+## 🎯 Strategy & Roadmap
+
+See **[Competitive Strategy](docs/COMPETITIVE_STRATEGY.md)** for how this project aligns with Twilio and Africa's Talking (feature parity and patterns) and our edge as an open source, embeddable, self-hosted messaging platform.
+
 ## 🤝 Contributing
 
 1. Fork the repository

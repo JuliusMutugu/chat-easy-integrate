@@ -1,5 +1,6 @@
 <script>
   import { onMount, onDestroy } from "svelte";
+  import { playClick, playSuccess, getEnterToSend } from "./theme.js";
 
   export let socket = null;
   export let config = {};
@@ -17,6 +18,25 @@
   let messagesContainer;
   let typingUsers = [];
   let typingTimeout;
+  let replyingTo = null;
+  let mentionShow = false;
+  let mentionQuery = "";
+  let messageInputEl;
+  let mentionListEl;
+  let showQuickReplies = false;
+  let greetingDismissed = false;
+
+  const QUICK_REPLIES = [
+    "Yes",
+    "No",
+    "Thanks",
+    "I'll get back to you",
+    "Let me check",
+    "Agreed",
+    "Noted",
+    "On it",
+    "Can we discuss?",
+  ];
 
   onMount(() => {
     if (socket) {
@@ -30,6 +50,9 @@
       removeSocketListeners();
     }
   });
+
+  /* Room isolation: this component is keyed by room.id so switching rooms remounts
+     and clears all state. Messages and events are scoped to this room only. */
 
   function joinRoom() {
     socket.emit("join-room", {
@@ -117,7 +140,7 @@
       const systemMessage = {
         id: Date.now(),
         type: "negotiation-end",
-        message: `Negotiation ${data.result}! Votes: ${data.votes.approve} approve, ${data.votes.reject} reject`,
+        message: `Negotiation ${data.result}. Votes: ${data.votes.approve} approve, ${data.votes.reject} reject`,
         timestamp: new Date(),
       };
       messages = [...messages, systemMessage];
@@ -137,6 +160,10 @@
     socket.on("user-stop-typing", (data) => {
       typingUsers = typingUsers.filter((u) => u !== data.username);
     });
+
+    socket.on("removed-from-room", () => {
+      onLeaveRoom();
+    });
   }
 
   function removeSocketListeners() {
@@ -148,17 +175,87 @@
     socket.off("negotiation-started");
     socket.off("vote-cast");
     socket.off("negotiation-completed");
+    socket.off("removed-from-room");
+  }
+
+  function removeMember(username) {
+    if (!socket || room.createdByUsername !== config.username || username === config.username) return;
+    socket.emit("remove-member", { roomId: room.id, targetUsername: username });
   }
 
   function sendMessage() {
     if (!newMessage.trim() || !socket) return;
 
-    socket.emit("send-message", {
+    const payload = {
       message: newMessage.trim(),
       type: "text",
-    });
+    };
+    if (replyingTo) {
+      payload.replyToMessageId = replyingTo.id;
+    }
+    socket.emit("send-message", payload);
 
+    playClick();
     newMessage = "";
+    replyingTo = null;
+    mentionShow = false;
+  }
+
+  function cancelReply() {
+    replyingTo = null;
+  }
+
+  function replyToMessage(message) {
+    if (message.type !== "text") return;
+    const snippet = message.message.length > 60 ? message.message.slice(0, 60) + "..." : message.message;
+    replyingTo = { id: message.id, username: message.username, snippet };
+  }
+
+  function getMessageById(id) {
+    return messages.find((m) => m.id === id);
+  }
+
+  function handleMessageInput() {
+    const lastAt = newMessage.lastIndexOf("@");
+    if (lastAt === -1) {
+      mentionShow = false;
+      return;
+    }
+    const afterAt = newMessage.slice(lastAt + 1);
+    if (/\s/.test(afterAt)) {
+      mentionShow = false;
+      return;
+    }
+    mentionShow = true;
+    mentionQuery = afterAt.toLowerCase();
+  }
+
+  $: mentionCandidates = users.filter(
+    (u) =>
+      u !== config.username &&
+      (!mentionQuery || u.toLowerCase().startsWith(mentionQuery))
+  );
+
+  function insertMention(username) {
+    const lastAt = newMessage.lastIndexOf("@");
+    newMessage = newMessage.slice(0, lastAt) + "@" + username + " ";
+    mentionShow = false;
+    mentionQuery = "";
+  }
+
+  function formatMessageBody(text) {
+    const str = typeof text === "string" ? text : (text != null ? String(text) : "");
+    const parts = [];
+    let lastIndex = 0;
+    const mentionRegex = /@(\S+)/g;
+    let m;
+    while ((m = mentionRegex.exec(str)) !== null) {
+      parts.push({ type: "text", value: str.slice(lastIndex, m.index) });
+      parts.push({ type: "mention", value: m[1], full: m[0] });
+      lastIndex = m.index + m[0].length;
+    }
+    parts.push({ type: "text", value: str.slice(lastIndex) });
+    return parts;
   }
 
   async function shareLocation() {
@@ -170,7 +267,6 @@
     }
 
     try {
-      // Show loading state
       const loadingMessage = {
         id: Date.now(),
         username: config.username,
@@ -184,12 +280,10 @@
       const position = await getCurrentPosition();
       const { latitude, longitude } = position.coords;
 
-      // Remove loading message
       messages = messages.filter((m) => m.id !== loadingMessage.id);
 
-      // Send location message
       socket.emit("send-message", {
-        message: `📍 Live location shared`,
+        message: "Live location shared",
         type: "location",
         location: {
           latitude,
@@ -199,13 +293,10 @@
         },
       });
     } catch (error) {
-      // Remove loading message if it exists
       messages = messages.filter((m) => m.type !== "location-loading");
 
       if (error.code === error.PERMISSION_DENIED) {
-        alert(
-          "Location access denied. Please allow location access to share your location."
-        );
+        alert("Location access denied. Please allow location to share.");
       } else if (error.code === error.POSITION_UNAVAILABLE) {
         alert("Location information is unavailable.");
       } else if (error.code === error.TIMEOUT) {
@@ -221,18 +312,14 @@
       navigator.geolocation.getCurrentPosition(resolve, reject, {
         enableHighAccuracy: true,
         timeout: 10000,
-        maximumAge: 60000, // Cache for 1 minute
+        maximumAge: 60000,
       });
     });
   }
 
   function openLocationInMaps(latitude, longitude) {
-    // Try to open in Google Maps, fallback to other map services
     const googleMapsUrl = `https://www.google.com/maps?q=${latitude},${longitude}`;
     const appleMapsUrl = `https://maps.apple.com/?q=${latitude},${longitude}`;
-    const bingMapsUrl = `https://www.bing.com/maps?q=${latitude},${longitude}`;
-
-    // Detect user agent and open appropriate map
     const userAgent = navigator.userAgent.toLowerCase();
 
     if (userAgent.includes("iphone") || userAgent.includes("ipad")) {
@@ -242,23 +329,48 @@
     }
   }
 
-  function handleKeyPress(event) {
-    if (event.key === "Enter" && !event.shiftKey) {
-      event.preventDefault();
-      sendMessage();
-    } else {
-      // Handle typing indicator
-      if (socket && newMessage.trim()) {
-        socket.emit("typing", { roomId: room.id, username: config.username });
-
-        clearTimeout(typingTimeout);
-        typingTimeout = setTimeout(() => {
-          socket.emit("stop-typing", {
-            roomId: room.id,
-            username: config.username,
-          });
-        }, 1000);
+  function handleInputKeydown(event) {
+    if (mentionShow && mentionCandidates.length > 0) {
+      if (event.key === "Escape") {
+        mentionShow = false;
+        event.preventDefault();
       }
+    }
+  }
+
+  function handleKeyPress(event) {
+    const enterToSend = getEnterToSend();
+    const isEnter = event.key === "Enter";
+    const isCtrlEnter = event.ctrlKey && isEnter;
+
+    if (mentionShow && mentionCandidates.length > 0 && isEnter) {
+      if (event.key === "Escape") return;
+      return;
+    }
+
+    if (enterToSend) {
+      if (isEnter && !event.shiftKey) {
+        event.preventDefault();
+        sendMessage();
+        return;
+      }
+    } else {
+      if (isCtrlEnter) {
+        event.preventDefault();
+        sendMessage();
+        return;
+      }
+    }
+
+    if (socket && newMessage.trim()) {
+      socket.emit("typing", { roomId: room.id, username: config.username });
+      clearTimeout(typingTimeout);
+      typingTimeout = setTimeout(() => {
+        socket.emit("stop-typing", {
+          roomId: room.id,
+          username: config.username,
+        });
+      }, 1000);
     }
   }
 
@@ -269,6 +381,7 @@
       proposal: negotiationProposal.trim(),
     });
 
+    playSuccess();
     negotiationProposal = "";
     showNegotiationForm = false;
   }
@@ -307,48 +420,77 @@
     if (message.username === config.username) return "own-message";
     return "other-message";
   }
+
+  function insertQuickReply(text) {
+    newMessage = newMessage ? newMessage + " " + text : text;
+    showQuickReplies = false;
+  }
+
+  $: negotiationVoteCounts = currentNegotiation
+    ? (() => {
+        const v = [...currentNegotiation.votes.values()];
+        return {
+          approve: v.filter((x) => x === "approve").length,
+          reject: v.filter((x) => x === "reject").length,
+        };
+      })()
+    : { approve: 0, reject: 0 };
 </script>
 
 <div class="chat-room">
-  <div class="chat-header">
-    <div class="room-info">
-      <button class="back-btn" onclick={onLeaveRoom}>← Leave</button>
-      <div>
-        <h3>🏠 {room.name}</h3>
-        <span class="user-info">👥 {userCount} users online</span>
+  <header class="chat-header">
+    <div class="header-left">
+      <button type="button" class="btn-back" onclick={onLeaveRoom}>Leave</button>
+      <div class="room-meta">
+        <h3 class="room-name">{room.name}</h3>
+        <span class="user-count">{userCount} online</span>
+        {#if room.createdByUsername === config.username && users.length > 0}
+          <div class="members-list" role="list">
+            {#each users as u}
+              <div class="member-row" role="listitem">
+                <span class="member-name">{u}</span>
+                {#if u !== config.username}
+                  <button type="button" class="btn-remove-member" onclick={() => removeMember(u)} title="Remove from room" aria-label="Remove {u} from room">Remove</button>
+                {/if}
+              </div>
+            {/each}
+          </div>
+        {/if}
       </div>
     </div>
 
-    <div class="room-actions">
+    <div class="header-right">
       {#if !isNegotiationActive}
         <button
-          class="negotiate-btn"
+          type="button"
+          class="btn-negotiate"
           onclick={() => (showNegotiationForm = !showNegotiationForm)}
         >
-          🤝 Start Negotiation
+          Start negotiation
         </button>
       {:else}
-        <span class="negotiation-status">🤝 Negotiation Active</span>
+        <span class="negotiation-badge">Negotiation active</span>
       {/if}
     </div>
-  </div>
+  </header>
 
   {#if showNegotiationForm}
     <div class="negotiation-form">
-      <div class="form-content">
-        <h4>🤝 Start Group Negotiation</h4>
+      <div class="negotiation-form-inner">
+        <h4>Start group negotiation</h4>
         <textarea
           bind:value={negotiationProposal}
           placeholder="Describe your proposal..."
           rows="2"
         ></textarea>
-        <div class="form-actions">
-          <button onclick={() => (showNegotiationForm = false)}>Cancel</button>
+        <div class="negotiation-form-actions">
+          <button type="button" onclick={() => (showNegotiationForm = false)}>Cancel</button>
           <button
+            type="button"
             onclick={startNegotiation}
             disabled={!negotiationProposal.trim()}
           >
-            Start Negotiation
+            Start
           </button>
         </div>
       </div>
@@ -357,91 +499,110 @@
 
   {#if isNegotiationActive && currentNegotiation}
     <div class="active-negotiation">
-      <div class="negotiation-content">
-        <h4>🤝 Active Negotiation</h4>
+      <div class="active-negotiation-inner">
+        <h4>Active negotiation</h4>
         <p><strong>Proposal:</strong> {currentNegotiation.proposal}</p>
         <p><strong>Proposed by:</strong> {currentNegotiation.proposer}</p>
+        {#if negotiationVoteCounts.approve > 0 || negotiationVoteCounts.reject > 0}
+          <p class="vote-summary">
+            {negotiationVoteCounts.approve} approved, {negotiationVoteCounts.reject} rejected
+          </p>
+        {/if}
 
         {#if !currentNegotiation.hasVoted && currentNegotiation.proposer !== config.username}
           <div class="vote-buttons">
-            <button class="approve-btn" onclick={() => vote("approve")}>
-              ✅ Approve
+            <button type="button" class="btn-vote approve" onclick={() => vote("approve")}>
+              Approve
             </button>
-            <button class="reject-btn" onclick={() => vote("reject")}>
-              ❌ Reject
+            <button type="button" class="btn-vote reject" onclick={() => vote("reject")}>
+              Reject
             </button>
           </div>
         {:else if currentNegotiation.hasVoted}
-          <p class="voted-status">✓ You have voted</p>
+          <p class="voted-status">You have voted.</p>
         {:else}
-          <p class="voted-status">⏳ Waiting for others to vote</p>
+          <p class="voted-status">Waiting for others to vote.</p>
         {/if}
       </div>
     </div>
   {/if}
 
-  <div class="messages-container" bind:this={messagesContainer}>
+  <div class="messages-wrap" bind:this={messagesContainer}>
+    {#if room.description && !greetingDismissed}
+      <div class="room-greeting">
+        <p class="room-greeting-desc">{room.description}</p>
+        <button type="button" class="room-greeting-dismiss" onclick={() => (greetingDismissed = true)} aria-label="Dismiss">Dismiss</button>
+      </div>
+    {/if}
     {#each messages as message}
       <div class="message {getMessageClass(message)}">
         {#if message.type === "text"}
           <div class="message-header">
-            <span class="username">{message.username}</span>
-            <span class="timestamp">{formatTime(message.timestamp)}</span>
+            <span class="msg-username">{message.username}</span>
+            <button type="button" class="msg-reply-btn" onclick={() => replyToMessage(message)} title="Reply to this message">Reply</button>
+            <span class="msg-time">{formatTime(message.timestamp)}</span>
           </div>
-          <div class="message-content">{message.message}</div>
+          {#if message.replyToMessageId}
+            {@const replyToMsg = getMessageById(message.replyToMessageId)}
+            {#if replyToMsg}
+              <div class="message-reply-to">
+                <span class="reply-to-label">Replying to {replyToMsg.username}:</span>
+                <span class="reply-to-snippet">{replyToMsg.message && (replyToMsg.message.length > 80 ? replyToMsg.message.slice(0, 80) + "..." : replyToMsg.message)}</span>
+              </div>
+            {/if}
+          {/if}
+          <div class="message-body">
+            {#each formatMessageBody(message.message) as part}
+              {#if part.type === "mention"}
+                <span class="mention">@{part.value}</span>
+              {:else}
+                {part.value}
+              {/if}
+            {/each}
+          </div>
+          {#if message.username === config.username}
+            <div class="message-status">Sent</div>
+          {/if}
         {:else if message.type === "location"}
           <div class="message-header">
-            <span class="username">{message.username}</span>
-            <span class="timestamp">{formatTime(message.timestamp)}</span>
+            <span class="msg-username">{message.username}</span>
+            <span class="msg-time">{formatTime(message.timestamp)}</span>
           </div>
-          <div class="location-message">
-            <div class="location-content">
-              <div class="location-text">
-                📍 {message.message}
-              </div>
-              <div class="location-details">
-                <small
-                  >Lat: {message.location.latitude.toFixed(6)}, Lng: {message.location.longitude.toFixed(
-                    6
-                  )}</small
-                >
+          <div class="location-msg">
+            <div class="location-body">
+              <span class="location-label">{message.message}</span>
+              <div class="location-coords">
+                <small>Lat: {message.location.latitude.toFixed(6)}, Lng: {message.location.longitude.toFixed(6)}</small>
                 {#if message.location.accuracy}
-                  <small
-                    >Accuracy: ±{Math.round(message.location.accuracy)}m</small
-                  >
+                  <small>Accuracy: ±{Math.round(message.location.accuracy)}m</small>
                 {/if}
               </div>
               <button
-                class="open-maps-btn"
+                type="button"
+                class="btn-maps"
                 onclick={() =>
                   openLocationInMaps(
                     message.location.latitude,
                     message.location.longitude
                   )}
               >
-                🗺️ Open in Maps
+                Open in maps
               </button>
             </div>
           </div>
         {:else if message.type === "location-loading"}
           <div class="message-header">
-            <span class="username">{message.username}</span>
-            <span class="timestamp">{formatTime(message.timestamp)}</span>
+            <span class="msg-username">{message.username}</span>
+            <span class="msg-time">{formatTime(message.timestamp)}</span>
           </div>
-          <div class="location-loading">
-            <span class="loading-spinner">🔄</span>
+          <div class="location-loading-msg">
+            <span class="loading-dot"></span>
             {message.message}
           </div>
         {:else}
-          <div class="system-content">
-            <span class="system-icon">
-              {#if message.type === "negotiation-start"}🤝
-              {:else if message.type === "negotiation-end"}🏁
-              {:else if message.type === "vote"}🗳️
-              {:else}ℹ️{/if}
-            </span>
-            {message.message}
-            <span class="timestamp">{formatTime(message.timestamp)}</span>
+          <div class="system-msg">
+            <span class="system-text">{message.message}</span>
+            <span class="msg-time">{formatTime(message.timestamp)}</span>
           </div>
         {/if}
       </div>
@@ -449,7 +610,7 @@
 
     {#if typingUsers.length > 0}
       <div class="typing-indicator">
-        <div class="typing-content">
+        <div class="typing-inner">
           <div class="typing-dots">
             <span></span>
             <span></span>
@@ -458,37 +619,81 @@
           <span class="typing-text">
             {typingUsers.length === 1
               ? `${typingUsers[0]} is typing...`
-              : `${typingUsers.slice(0, 2).join(", ")}${typingUsers.length > 2 ? ` and ${typingUsers.length - 2} others` : ""} are typing...`}
+              : `${typingUsers.slice(0, 2).join(", ")}${typingUsers.length > 2 ? ` and ${typingUsers.length - 2} others` : ""} typing...`}
           </span>
         </div>
       </div>
     {/if}
   </div>
 
-  <div class="message-input">
-    <div class="input-container">
-      <div class="input-actions">
+  <div class="input-area">
+    {#if replyingTo}
+      <div class="replying-to-bar">
+        <span class="replying-to-label">Replying to {replyingTo.username}:</span>
+        <span class="replying-to-snippet">{replyingTo.snippet}</span>
+        <button type="button" class="replying-to-cancel" onclick={cancelReply} aria-label="Cancel reply">Cancel</button>
+      </div>
+    {/if}
+    <div class="input-row input-row-wrap">
+      <div class="input-with-mentions">
+        <div class="quick-replies-wrap">
+          <button
+            type="button"
+            class="btn-quick-replies"
+            onclick={() => (showQuickReplies = !showQuickReplies)}
+            title="Quick replies"
+            aria-expanded={showQuickReplies}
+            aria-haspopup="true"
+          >
+            Quick replies
+          </button>
+          {#if showQuickReplies}
+            <div class="quick-replies-dropdown" role="menu">
+              {#each QUICK_REPLIES as text}
+                <button type="button" class="quick-reply-option" role="menuitem" onclick={() => insertQuickReply(text)}>
+                  {text}
+                </button>
+              {/each}
+            </div>
+          {/if}
+        </div>
+        <textarea
+          bind:this={messageInputEl}
+          bind:value={newMessage}
+          placeholder="Type your message... Use @ to mention someone"
+          rows="1"
+          oninput={handleMessageInput}
+          onkeydown={handleInputKeydown}
+          onkeypress={handleKeyPress}
+        ></textarea>
+        {#if mentionShow && mentionCandidates.length > 0}
+          <div class="mention-dropdown" bind:this={mentionListEl} role="listbox">
+            {#each mentionCandidates.slice(0, 5) as user}
+              <button type="button" class="mention-option" role="option" aria-selected="false" onclick={() => insertMention(user)}>
+                {user}
+              </button>
+            {/each}
+          </div>
+        {/if}
+      </div>
+      <div class="input-actions-row">
         <button
-          class="location-btn"
+          type="button"
+          class="btn-location"
           onclick={shareLocation}
           title="Share live location"
         >
-          📍
+          Location
+        </button>
+        <button
+          type="button"
+          class="btn-send"
+          onclick={sendMessage}
+          disabled={!newMessage.trim()}
+        >
+          Send
         </button>
       </div>
-      <textarea
-        bind:value={newMessage}
-        placeholder="Type your message..."
-        rows="1"
-        onkeypress={handleKeyPress}
-      ></textarea>
-      <button
-        class="send-btn"
-        onclick={sendMessage}
-        disabled={!newMessage.trim()}
-      >
-        📤
-      </button>
     </div>
   </div>
 </div>
@@ -501,191 +706,312 @@
   }
 
   .chat-header {
-    padding: 15px 20px;
-    border-bottom: 1px solid #e1e5e9;
+    padding: 1rem 1.25rem;
+    border-bottom: 1px solid var(--border);
     display: flex;
     justify-content: space-between;
     align-items: center;
-    background: #f8f9fa;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    background: var(--bg-secondary);
+    flex-shrink: 0;
+    transition: background-color var(--duration-normal) var(--ease-in-out);
   }
 
-  .room-info {
+  .header-left {
     display: flex;
     align-items: center;
-    gap: 15px;
+    gap: 1rem;
   }
 
-  .back-btn {
-    background: #f5f5f5;
-    border: 1px solid #ddd;
+  .btn-back {
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
     border-radius: 8px;
-    padding: 8px 12px;
+    padding: 0.5rem 1rem;
     cursor: pointer;
-    transition: all 0.3s;
-    font-size: 14px;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: var(--gray-700);
+    font-family: inherit;
+    transition: background-color 0.15s ease, border-color 0.15s ease;
   }
 
-  .back-btn:hover {
-    background: #e9e9e9;
-    transform: translateX(-2px);
+  .btn-back:hover {
+    background: var(--gray-100);
+    border-color: var(--gray-300);
   }
 
-  .room-info h3 {
-    margin: 0 0 5px 0;
-    color: #333;
-    font-size: 1.1em;
+  .room-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 0.125rem;
   }
 
-  .user-info {
-    font-size: 12px;
-    color: #666;
+  .room-name {
+    margin: 0;
+    font-size: 1.0625rem;
+    font-weight: 600;
+    color: var(--navy-900);
   }
 
-  .negotiate-btn {
-    background: linear-gradient(135deg, #ff9800 0%, #f57c00 100%);
-    color: white;
+  .user-count {
+    font-size: 0.75rem;
+    color: var(--gray-600);
+  }
+
+  .members-list {
+    margin-top: 0.5rem;
+    padding-top: 0.5rem;
+    border-top: 1px solid var(--border);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: center;
+  }
+
+  .member-row {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    font-size: 0.8125rem;
+    color: var(--gray-700);
+  }
+
+  .member-name {
+    font-weight: 500;
+  }
+
+  .btn-remove-member {
+    padding: 0.2rem 0.5rem;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    background: var(--gray-100);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--gray-700);
+    cursor: pointer;
+    font-family: inherit;
+    transition: background-color 0.15s ease, border-color 0.15s ease;
+  }
+
+  .btn-remove-member:hover {
+    background: var(--gray-200);
+    border-color: var(--gray-400);
+    color: var(--gray-900);
+  }
+
+  .header-right {
+    display: flex;
+    align-items: center;
+  }
+
+  .btn-negotiate {
+    background: var(--green-600);
+    color: var(--white);
     border: none;
     border-radius: 8px;
-    padding: 10px 16px;
+    padding: 0.5rem 1rem;
     cursor: pointer;
-    font-weight: 500;
-    transition: all 0.3s;
-    font-size: 14px;
+    font-weight: 600;
+    font-size: 0.875rem;
+    font-family: inherit;
+    transition: background-color 0.15s ease, transform 0.2s var(--ease-spring);
   }
 
-  .negotiate-btn:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 5px 15px rgba(255, 152, 0, 0.4);
+  .btn-negotiate:hover {
+    background: var(--green-700);
+    transform: translateY(-1px);
   }
 
-  .negotiation-status {
-    background: #ff9800;
-    color: white;
-    padding: 10px 16px;
+  .negotiation-badge {
+    background: var(--green-600);
+    color: var(--white);
+    padding: 0.5rem 1rem;
     border-radius: 8px;
-    font-size: 14px;
-    font-weight: 500;
+    font-size: 0.875rem;
+    font-weight: 600;
   }
 
   .negotiation-form {
-    background: #fff3e0;
-    border-bottom: 1px solid #ffcc02;
-    padding: 15px 20px;
+    background: var(--green-100);
+    border-bottom: 1px solid var(--green-400);
+    padding: 1rem 1.25rem;
+    flex-shrink: 0;
   }
 
-  .form-content h4 {
-    margin: 0 0 10px 0;
-    color: #e65100;
+  .negotiation-form-inner h4 {
+    margin: 0 0 0.5rem;
+    font-size: 0.9375rem;
+    font-weight: 600;
+    color: var(--green-800);
   }
 
-  .form-content textarea {
+  .negotiation-form-inner textarea {
     width: 100%;
-    padding: 10px;
-    border: 1px solid #ffcc02;
+    padding: 0.75rem 1rem;
+    border: 1px solid var(--green-400);
     border-radius: 8px;
     resize: vertical;
     font-family: inherit;
-    margin-bottom: 10px;
+    font-size: 0.875rem;
+    margin-bottom: 0.75rem;
+    transition: border-color 0.15s ease;
   }
 
-  .form-actions {
+  .negotiation-form-inner textarea:focus {
+    outline: none;
+    border-color: var(--green-600);
+  }
+
+  .negotiation-form-actions {
     display: flex;
-    gap: 10px;
+    gap: 0.5rem;
   }
 
-  .form-actions button {
-    padding: 8px 16px;
-    border-radius: 6px;
+  .negotiation-form-actions button {
+    padding: 0.5rem 1rem;
+    border-radius: 8px;
     cursor: pointer;
-    font-size: 14px;
-    transition: all 0.3s;
+    font-size: 0.875rem;
+    font-weight: 500;
+    font-family: inherit;
+    transition: background-color 0.15s ease, border-color 0.15s ease;
   }
 
-  .form-actions button:first-child {
-    background: white;
-    border: 1px solid #ddd;
-    color: #666;
+  .negotiation-form-actions button:first-child {
+    background: var(--white);
+    border: 1px solid var(--border);
+    color: var(--gray-700);
   }
 
-  .form-actions button:last-child {
-    background: #ff9800;
+  .negotiation-form-actions button:last-child {
+    background: var(--green-600);
     border: none;
-    color: white;
+    color: var(--white);
   }
 
-  .form-actions button:disabled {
+  .negotiation-form-actions button:disabled {
     opacity: 0.5;
     cursor: not-allowed;
   }
 
   .active-negotiation {
-    background: linear-gradient(135deg, #fff3e0 0%, #ffffff 100%);
-    border-bottom: 1px solid #ffcc02;
-    padding: 15px 20px;
+    background: var(--green-100);
+    border-bottom: 1px solid var(--green-400);
+    padding: 1rem 1.25rem;
+    flex-shrink: 0;
   }
 
-  .negotiation-content h4 {
-    margin: 0 0 10px 0;
-    color: #e65100;
+  .active-negotiation-inner h4 {
+    margin: 0 0 0.5rem;
+    font-size: 0.9375rem;
+    font-weight: 600;
+    color: var(--green-800);
   }
 
-  .negotiation-content p {
-    margin: 5px 0;
-    font-size: 14px;
+  .active-negotiation-inner p {
+    margin: 0.25rem 0;
+    font-size: 0.875rem;
+    color: var(--navy-900);
   }
 
   .vote-buttons {
     display: flex;
-    gap: 10px;
-    margin-top: 10px;
+    gap: 0.5rem;
+    margin-top: 0.75rem;
   }
 
-  .approve-btn {
-    background: #4caf50;
-    color: white;
+  .btn-vote {
     border: none;
-    padding: 8px 16px;
-    border-radius: 6px;
+    padding: 0.5rem 1rem;
+    border-radius: 8px;
     cursor: pointer;
-    transition: all 0.3s;
+    font-weight: 600;
+    font-size: 0.875rem;
+    font-family: inherit;
+    transition: background-color 0.15s ease, transform 0.2s var(--ease-spring);
   }
 
-  .reject-btn {
-    background: #f44336;
-    color: white;
-    border: none;
-    padding: 8px 16px;
-    border-radius: 6px;
-    cursor: pointer;
-    transition: all 0.3s;
+  .btn-vote.approve {
+    background: var(--green-600);
+    color: var(--white);
+  }
+
+  .btn-vote.reject {
+    background: var(--gray-500);
+    color: var(--white);
+  }
+
+  .btn-vote:hover {
+    transform: translateY(-1px);
   }
 
   .voted-status {
-    color: #666;
+    color: var(--gray-600);
+    font-size: 0.875rem;
     font-style: italic;
-    margin-top: 10px;
+    margin-top: 0.5rem;
   }
 
-  .messages-container {
+  .vote-summary {
+    font-size: 0.8125rem;
+    color: var(--text-secondary);
+    margin: 0.25rem 0 0;
+    font-weight: 500;
+  }
+
+  .room-greeting {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    padding: 0.75rem 1rem;
+    margin-bottom: 0.5rem;
+    background: var(--green-100);
+    border: 1px solid var(--green-400);
+    border-radius: 10px;
+  }
+
+  .room-greeting-desc {
+    flex: 1;
+    font-size: 0.875rem;
+    color: var(--green-800);
+    margin: 0;
+    line-height: 1.4;
+  }
+
+  .room-greeting-dismiss {
+    background: none;
+    border: none;
+    color: var(--green-800);
+    cursor: pointer;
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 0.25rem 0.5rem;
+    font-family: inherit;
+  }
+
+  .room-greeting-dismiss:hover {
+    text-decoration: underline;
+  }
+
+  .messages-wrap {
     flex: 1;
     overflow-y: auto;
-    padding: 20px;
+    padding: 1.25rem;
     display: flex;
     flex-direction: column;
-    gap: 15px;
+    gap: 1rem;
   }
 
   .message {
-    max-width: 70%;
+    max-width: 75%;
     word-wrap: break-word;
+    animation: msgAppear 0.3s var(--ease-out-expo);
   }
 
   .own-message {
     align-self: flex-end;
-  }
-
-  .own-message .message-header .username {
-    color: #667eea;
   }
 
   .other-message {
@@ -705,321 +1031,489 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 5px;
-    gap: 10px;
+    margin-bottom: 0.25rem;
+    gap: 0.5rem;
+    flex-wrap: wrap;
   }
 
-  .username {
+  .msg-username {
     font-weight: 600;
-    font-size: 14px;
-    color: #333;
+    font-size: 0.8125rem;
+    color: var(--navy-800);
   }
 
-  .timestamp {
-    font-size: 11px;
-    color: #999;
+  .own-message .msg-username {
+    color: var(--navy-700);
   }
 
-  .message-content {
-    background: #f1f3f4;
-    padding: 10px 15px;
-    border-radius: 18px;
-    font-size: 14px;
+  .msg-time {
+    font-size: 0.6875rem;
+    color: var(--gray-500);
+  }
+
+  .message-body {
+    background: var(--gray-100);
+    padding: 0.75rem 1rem;
+    border-radius: 12px;
+    font-size: 0.9375rem;
     line-height: 1.4;
+    color: var(--navy-900);
   }
 
-  .own-message .message-content {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    color: white;
+  .own-message .message-body {
+    background: var(--navy-700);
+    color: var(--white);
   }
 
-  .system-content {
-    background: #e3f2fd;
-    color: #1976d2;
-    padding: 8px 15px;
-    border-radius: 20px;
-    font-size: 13px;
+  .system-msg {
+    background: var(--navy-100);
+    color: var(--navy-800);
+    padding: 0.5rem 1rem;
+    border-radius: 999px;
+    font-size: 0.8125rem;
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 0.5rem;
+    flex-wrap: wrap;
   }
 
-  .negotiation-message .system-content {
-    background: #fff3e0;
-    color: #e65100;
+  .negotiation-message .system-msg {
+    background: var(--green-100);
+    color: var(--green-800);
   }
 
-  .negotiation-end-message .system-content {
-    background: #e8f5e8;
-    color: #2e7d32;
+  .negotiation-end-message .system-msg {
+    background: var(--green-100);
+    color: var(--green-800);
   }
 
-  .vote-message .system-content {
-    background: #f3e5f5;
-    color: #7b1fa2;
+  .vote-message .system-msg {
+    background: var(--gray-200);
+    color: var(--gray-800);
   }
 
-  .system-icon {
-    font-size: 14px;
+  .system-text {
+    flex: 1;
   }
 
   .typing-indicator {
     align-self: flex-start;
-    margin-bottom: 10px;
+    margin-bottom: 0.5rem;
   }
 
-  .typing-content {
+  .typing-inner {
     display: flex;
     align-items: center;
-    gap: 8px;
-    background: #f1f3f4;
-    padding: 8px 12px;
-    border-radius: 15px;
-    font-size: 13px;
-    color: #666;
+    gap: 0.5rem;
+    background: var(--gray-100);
+    padding: 0.5rem 1rem;
+    border-radius: 12px;
+    font-size: 0.8125rem;
+    color: var(--gray-600);
   }
 
   .typing-dots {
     display: flex;
-    gap: 2px;
+    gap: 3px;
   }
 
   .typing-dots span {
     width: 4px;
     height: 4px;
-    background: #667eea;
+    background: var(--navy-600);
     border-radius: 50%;
-    animation: typing 1.4s ease-in-out infinite;
+    animation: typingBounce 1.2s var(--ease-out-expo) infinite;
   }
 
-  .typing-dots span:nth-child(1) {
-    animation-delay: 0s;
-  }
-  .typing-dots span:nth-child(2) {
-    animation-delay: 0.2s;
-  }
-  .typing-dots span:nth-child(3) {
-    animation-delay: 0.4s;
-  }
+  .typing-dots span:nth-child(1) { animation-delay: 0s; }
+  .typing-dots span:nth-child(2) { animation-delay: 0.15s; }
+  .typing-dots span:nth-child(3) { animation-delay: 0.3s; }
 
-  @keyframes typing {
-    0%,
-    60%,
-    100% {
-      transform: translateY(0);
-      opacity: 0.4;
+  @keyframes msgAppear {
+    from {
+      opacity: 0;
+      transform: scale(0.97) translateY(4px);
     }
-    30% {
-      transform: translateY(-6px);
+    to {
       opacity: 1;
+      transform: scale(1) translateY(0);
     }
   }
 
-  .message-input {
-    padding: 15px 20px;
-    border-top: 1px solid #e1e5e9;
-    background: white;
+  @keyframes typingBounce {
+    0%, 60%, 100% { transform: translateY(0); opacity: 0.5; }
+    30% { transform: translateY(-4px); opacity: 1; }
   }
 
-  .input-container {
+  .input-area {
+    padding: 1rem 1.25rem;
+    border-top: 1px solid var(--border);
+    background: var(--bg-primary);
+    flex-shrink: 0;
+    transition: background-color var(--duration-normal) var(--ease-in-out);
+  }
+
+  .replying-to-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 0.75rem;
+    margin-bottom: 0.5rem;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 0.8125rem;
+  }
+
+  .replying-to-label {
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+
+  .replying-to-snippet {
+    flex: 1;
+    color: var(--text-secondary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .replying-to-cancel {
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    padding: 0.25rem 0.5rem;
+    font-family: inherit;
+  }
+
+  .replying-to-cancel:hover {
+    color: var(--text-primary);
+  }
+
+  .input-row {
     display: flex;
     align-items: flex-end;
-    gap: 10px;
+    gap: 0.75rem;
     max-width: 800px;
     margin: 0 auto;
   }
 
-  .input-actions {
-    display: flex;
-    gap: 5px;
-  }
-
-  .location-btn {
-    background: #28a745;
-    color: white;
-    border: none;
-    border-radius: 50%;
-    width: 40px;
-    height: 40px;
-    cursor: pointer;
-    font-size: 16px;
-    transition: all 0.3s ease;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-
-  .location-btn:hover {
-    background: #218838;
-    transform: scale(1.05);
-  }
-
-  .location-btn:active {
-    transform: scale(0.95);
-  }
-
-  .input-container {
-    display: flex;
-    gap: 10px;
-    align-items: end;
-  }
-
-  .input-container textarea {
+  .input-with-mentions {
     flex: 1;
-    padding: 12px;
-    border: 2px solid #e1e5e9;
-    border-radius: 20px;
-    resize: none;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .mention-dropdown {
+    position: absolute;
+    bottom: 100%;
+    left: 0;
+    right: 0;
+    margin-bottom: 4px;
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+    max-height: 200px;
+    overflow-y: auto;
+    z-index: 10;
+  }
+
+  .mention-option {
+    display: block;
+    width: 100%;
+    padding: 0.5rem 0.75rem;
+    text-align: left;
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 0.875rem;
+    color: var(--text-primary);
     font-family: inherit;
-    font-size: 14px;
-    transition: border-color 0.3s;
-    max-height: 100px;
+    transition: background-color 0.15s ease;
   }
 
-  .input-container textarea:focus {
-    outline: none;
-    border-color: #667eea;
+  .mention-option:hover {
+    background: var(--bg-secondary);
   }
 
-  .input-container button {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    color: white;
-    border: none;
-    width: 45px;
-    height: 45px;
-    border-radius: 50%;
-    cursor: pointer;
-    transition: all 0.3s;
-    font-size: 16px;
-  }
-
-  .input-container button:hover:not(:disabled) {
-    transform: scale(1.1);
-    box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
-  }
-
-  .input-container button:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-    transform: none;
-  }
-
-  /* Location Message Styles */
-  .location-message {
-    background: #e8f5e8;
-    border: 1px solid #c3e6c3;
-    border-radius: 10px;
-    padding: 12px;
-    margin-top: 5px;
-  }
-
-  .location-content {
+  .input-actions-row {
     display: flex;
-    flex-direction: column;
-    gap: 8px;
+    gap: 0.5rem;
+    align-items: center;
   }
 
-  .location-text {
-    font-weight: 500;
-    color: #2d5a2d;
-  }
-
-  .location-details {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    color: #666;
-    font-size: 12px;
-  }
-
-  .open-maps-btn {
-    background: #007bff;
-    color: white;
+  .btn-location {
+    background: var(--green-600);
+    color: var(--white);
     border: none;
-    border-radius: 6px;
-    padding: 8px 12px;
+    border-radius: 8px;
+    padding: 0.5rem 1rem;
     cursor: pointer;
-    font-size: 12px;
-    font-weight: 500;
-    transition: all 0.3s ease;
-    align-self: flex-start;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    font-family: inherit;
+    transition: background-color 0.15s ease, transform 0.2s var(--ease-spring);
   }
 
-  .open-maps-btn:hover {
-    background: #0056b3;
+  .btn-location:hover {
+    background: var(--green-700);
     transform: translateY(-1px);
   }
 
-  .location-loading {
-    background: #fff3cd;
-    border: 1px solid #ffeaa7;
+  .input-with-mentions textarea,
+  .input-row textarea {
+    flex: 1;
+    width: 100%;
+    padding: 0.75rem 1rem;
+    border: 2px solid var(--border);
     border-radius: 10px;
-    padding: 12px;
-    margin-top: 5px;
-    color: #856404;
-    display: flex;
-    align-items: center;
-    gap: 8px;
+    resize: none;
+    font-family: inherit;
+    font-size: 0.9375rem;
+    transition: border-color 0.15s ease;
+    max-height: 120px;
   }
 
-  .loading-spinner {
-    animation: spin 1s linear infinite;
+  .input-with-mentions textarea:focus,
+  .input-row textarea:focus {
+    outline: none;
+    border-color: var(--green-600);
   }
 
-  @keyframes spin {
-    0% {
-      transform: rotate(0deg);
-    }
-    100% {
-      transform: rotate(360deg);
-    }
-  }
-
-  .send-btn {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    color: white;
+  .msg-reply-btn {
+    background: none;
     border: none;
-    width: 45px;
-    height: 45px;
-    border-radius: 50%;
+    color: var(--text-secondary);
     cursor: pointer;
-    transition: all 0.3s;
-    font-size: 16px;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    padding: 0.125rem 0.375rem;
+    font-family: inherit;
+    margin-left: auto;
   }
 
-  .send-btn:hover:not(:disabled) {
-    transform: scale(1.1);
-    box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+  .msg-reply-btn:hover {
+    color: var(--green-600);
   }
 
-  .send-btn:disabled {
+  .message-reply-to {
+    padding: 0.375rem 0.5rem;
+    margin-bottom: 0.25rem;
+    background: var(--bg-secondary);
+    border-left: 3px solid var(--green-500);
+    border-radius: 0 6px 6px 0;
+    font-size: 0.8125rem;
+  }
+
+  .reply-to-label {
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-right: 0.25rem;
+  }
+
+  .reply-to-snippet {
+    color: var(--text-secondary);
+  }
+
+  .message-body .mention {
+    color: var(--green-700);
+    font-weight: 600;
+    background: var(--green-100);
+    padding: 0.125rem 0.25rem;
+    border-radius: 4px;
+  }
+
+  .own-message .message-body .mention {
+    background: rgba(255, 255, 255, 0.25);
+    color: var(--white);
+  }
+
+  .message-status {
+    font-size: 0.6875rem;
+    color: var(--text-secondary);
+    margin-top: 0.25rem;
+    text-align: right;
+  }
+
+  .quick-replies-wrap {
+    position: relative;
+    margin-bottom: 0.5rem;
+  }
+
+  .btn-quick-replies {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    padding: 0.375rem 0.75rem;
+    border-radius: 8px;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    cursor: pointer;
+    font-family: inherit;
+    transition: background-color 0.15s ease, border-color 0.15s ease;
+  }
+
+  .btn-quick-replies:hover {
+    background: var(--gray-200);
+    border-color: var(--gray-300);
+    color: var(--text-primary);
+  }
+
+  .quick-replies-dropdown {
+    position: absolute;
+    bottom: 100%;
+    left: 0;
+    margin-bottom: 4px;
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+    max-height: 220px;
+    overflow-y: auto;
+    z-index: 12;
+    min-width: 180px;
+  }
+
+  .quick-reply-option {
+    display: block;
+    width: 100%;
+    padding: 0.5rem 0.75rem;
+    text-align: left;
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 0.875rem;
+    color: var(--text-primary);
+    font-family: inherit;
+    transition: background-color 0.15s ease;
+  }
+
+  .quick-reply-option:hover {
+    background: var(--bg-secondary);
+  }
+
+  .btn-send {
+    background: var(--green-600);
+    color: var(--white);
+    border: none;
+    padding: 0.75rem 1.25rem;
+    border-radius: 10px;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 0.9375rem;
+    font-family: inherit;
+    transition: background-color 0.15s ease, transform 0.2s var(--ease-spring);
+  }
+
+  .btn-send:hover:not(:disabled) {
+    background: var(--green-700);
+    transform: translateY(-1px);
+  }
+
+  .btn-send:disabled {
     opacity: 0.5;
     cursor: not-allowed;
     transform: none;
+  }
+
+  .location-msg {
+    background: var(--green-100);
+    border: 1px solid var(--green-400);
+    border-radius: 10px;
+    padding: 0.75rem 1rem;
+    margin-top: 0.25rem;
+  }
+
+  .location-body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .location-label {
+    font-weight: 600;
+    color: var(--green-800);
+    font-size: 0.875rem;
+  }
+
+  .location-coords {
+    display: flex;
+    flex-direction: column;
+    gap: 0.125rem;
+    color: var(--gray-600);
+    font-size: 0.75rem;
+  }
+
+  .btn-maps {
+    background: var(--navy-700);
+    color: var(--white);
+    border: none;
+    border-radius: 6px;
+    padding: 0.5rem 0.75rem;
+    cursor: pointer;
+    font-size: 0.75rem;
+    font-weight: 600;
+    font-family: inherit;
+    align-self: flex-start;
+    transition: background-color 0.15s ease;
+  }
+
+  .btn-maps:hover {
+    background: var(--navy-800);
+  }
+
+  .location-loading-msg {
+    background: var(--gray-100);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 0.75rem 1rem;
+    margin-top: 0.25rem;
+    color: var(--gray-700);
+    font-size: 0.875rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .loading-dot {
+    width: 8px;
+    height: 8px;
+    background: var(--navy-600);
+    border-radius: 50%;
+    animation: pulse 1s var(--ease-out-expo) infinite;
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
   }
 
   @media (max-width: 768px) {
     .chat-header {
-      padding: 10px 15px;
+      padding: 0.75rem 1rem;
       flex-direction: column;
-      gap: 10px;
       align-items: stretch;
     }
 
-    .room-info {
+    .header-left {
       justify-content: space-between;
     }
 
     .message {
-      max-width: 85%;
+      max-width: 90%;
     }
 
-    .messages-container {
-      padding: 15px;
+    .messages-wrap {
+      padding: 1rem;
     }
 
-    .message-input {
-      padding: 10px 15px;
+    .input-area {
+      padding: 0.75rem 1rem;
     }
   }
 </style>

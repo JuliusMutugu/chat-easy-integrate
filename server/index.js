@@ -13,8 +13,13 @@ import {
   updateRoomInviteToken,
   addUserToRoom,
   removeUserFromRoom,
+  removeUserFromRoomByUsername,
   getRoomUsers,
   getUserBySocketId,
+  getCreatorSocketIdInRoom,
+  addPendingJoinRequest,
+  getPendingJoinRequest,
+  deletePendingJoinRequest,
   saveMessage,
   getRoomMessages,
 } from "./database.js";
@@ -47,16 +52,20 @@ app.get("/api/health", (req, res) => {
 
 app.post("/api/rooms", async (req, res) => {
   try {
-    const { name, description, maxUsers = 10 } = req.body;
+    const { name, description, maxUsers = 10, createdBy } = req.body;
     const serverUrl = `${req.protocol}://${req.get("host")}`;
 
-    const room = await createRoom({ name, description, maxUsers }, serverUrl);
+    const room = await createRoom(
+      { name, description, maxUsers, createdByUsername: createdBy },
+      serverUrl
+    );
 
     res.json({
       roomId: room.id,
       roomCode: room.code,
       name: room.name,
       description: room.description,
+      createdByUsername: room.createdByUsername,
       inviteToken: room.inviteToken,
       inviteLink: room.inviteLink,
     });
@@ -105,18 +114,20 @@ app.get("/api/rooms", async (req, res) => {
   }
 });
 
-app.get("/api/rooms/:roomId", async (req, res) => {
+app.get("/api/rooms/invite/:inviteToken", async (req, res) => {
   try {
-    const { roomId } = req.params;
-    const room = await getRoomById(roomId);
+    const { inviteToken } = req.params;
+    const room = await getRoomByInviteToken(inviteToken);
 
     if (!room) {
-      return res.status(404).json({ error: "Room not found" });
+      return res
+        .status(404)
+        .json({ error: "Invalid or expired invitation link" });
     }
 
     res.json(room);
   } catch (error) {
-    console.error("Error fetching room:", error);
+    console.error("Error fetching room by invite token:", error);
     res.status(500).json({ error: "Failed to fetch room" });
   }
 });
@@ -137,34 +148,66 @@ app.get("/api/rooms/code/:roomCode", async (req, res) => {
   }
 });
 
-// New endpoint for invite token lookup
-app.get("/api/rooms/invite/:inviteToken", async (req, res) => {
+app.get("/api/rooms/:roomId", async (req, res) => {
   try {
-    const { inviteToken } = req.params;
-    const room = await getRoomByInviteToken(inviteToken);
+    const { roomId } = req.params;
+    const room = await getRoomById(roomId);
 
     if (!room) {
-      return res
-        .status(404)
-        .json({ error: "Invalid or expired invitation link" });
+      return res.status(404).json({ error: "Room not found" });
     }
 
     res.json(room);
   } catch (error) {
-    console.error("Error fetching room by invite token:", error);
+    console.error("Error fetching room:", error);
     res.status(500).json({ error: "Failed to fetch room" });
   }
 });
 
-// Generate new invite link for existing room
+app.get("/api/rooms/:roomId/messages", async (req, res) => {
+  try {
+    const { roomId } = req.params;
+    const room = await getRoomById(roomId);
+    if (!room) {
+      return res.status(404).json({ error: "Room not found" });
+    }
+    const messages = await getRoomMessages(roomId);
+    res.json(messages);
+  } catch (error) {
+    console.error("Error fetching room messages:", error);
+    res.status(500).json({ error: "Failed to fetch messages" });
+  }
+});
+
+// Generate new invite link for existing room (only room creator, and must be in room)
 app.post("/api/rooms/:roomId/invite", async (req, res) => {
   try {
     const { roomId } = req.params;
+    const { invitedBy } = req.body || {};
     const serverUrl = `${req.protocol}://${req.get("host")}`;
 
     const room = await getRoomById(roomId);
     if (!room) {
       return res.status(404).json({ error: "Room not found" });
+    }
+
+    if (!invitedBy || typeof invitedBy !== "string" || !invitedBy.trim()) {
+      return res.status(400).json({ error: "invitedBy (username) is required" });
+    }
+    const username = invitedBy.trim();
+
+    if (room.createdByUsername !== username) {
+      return res.status(403).json({
+        error: "Only the room creator can generate invite links",
+      });
+    }
+
+    const users = await getRoomUsers(roomId);
+    const isInRoom = users.some((u) => u.username === username);
+    if (!isInRoom) {
+      return res.status(403).json({
+        error: "You must be in the room to invite others",
+      });
     }
 
     const { inviteToken, inviteLink } = await updateRoomInviteToken(
@@ -220,20 +263,19 @@ io.on("connection", (socket) => {
         return;
       }
 
-      // Store user info in database and active connections
-      await addUserToRoom(roomId, socket.id, username);
-      activeConnections.set(socket.id, { roomId, username });
+      const existingUser = await getUserBySocketId(socket.id);
+      const alreadyInRoom = existingUser && existingUser.room_id === roomId;
 
+      if (!alreadyInRoom) {
+        await addUserToRoom(roomId, socket.id, username);
+        socket.to(roomId).emit("user-joined", { username, userId: socket.id });
+      }
+      activeConnections.set(socket.id, { roomId, username });
       socket.join(roomId);
 
-      // Send existing messages to new user
       const messages = await getRoomMessages(roomId);
       socket.emit("message-history", messages);
 
-      // Notify room about new user
-      socket.to(roomId).emit("user-joined", { username, userId: socket.id });
-
-      // Send updated room info
       const users = await getRoomUsers(roomId);
       io.to(roomId).emit("room-update", {
         userCount: users.length,
@@ -245,7 +287,143 @@ io.on("connection", (socket) => {
     }
   });
 
-  socket.on("send-message", async ({ message, type = "text", location }) => {
+  // Request to join via invite link (creator gets accept/decline; requester waits for join-approved or join-declined)
+  socket.on("request-join-room", async ({ inviteToken, username }) => {
+    try {
+      if (!inviteToken || !username?.trim()) {
+        socket.emit("error", { message: "inviteToken and username are required" });
+        return;
+      }
+      const room = await getRoomByInviteToken(inviteToken);
+      if (!room) {
+        socket.emit("error", { message: "Invalid or expired invite link" });
+        return;
+      }
+      if (room.userCount >= room.maxUsers) {
+        socket.emit("error", { message: "Room is full" });
+        return;
+      }
+      const requestId = await addPendingJoinRequest(room.id, username.trim(), socket.id);
+      const creatorSocketId = await getCreatorSocketIdInRoom(room.id);
+      if (creatorSocketId) {
+        io.to(creatorSocketId).emit("join-request", {
+          requestId,
+          roomId: room.id,
+          roomName: room.name,
+          requesterUsername: username.trim(),
+        });
+      } else {
+        socket.emit("error", { message: "Room creator is not available to approve your request" });
+        await deletePendingJoinRequest(requestId);
+      }
+    } catch (error) {
+      console.error("Error requesting join:", error);
+      socket.emit("error", { message: "Failed to request join" });
+    }
+  });
+
+  socket.on("join-request-accept", async ({ requestId }) => {
+    try {
+      const connection = activeConnections.get(socket.id);
+      if (!connection) return;
+      const pending = await getPendingJoinRequest(requestId);
+      if (!pending) {
+        socket.emit("error", { message: "Request not found or already handled" });
+        return;
+      }
+      const room = await getRoomById(pending.room_id);
+      if (!room) return;
+      if (room.createdByUsername !== connection.username) {
+        socket.emit("error", { message: "Only the room creator can accept join requests" });
+        return;
+      }
+      if (room.userCount >= room.maxUsers) {
+        socket.emit("error", { message: "Room is full" });
+        await deletePendingJoinRequest(requestId);
+        io.to(pending.requester_socket_id).emit("join-declined", { roomId: room.id, roomName: room.name });
+        return;
+      }
+      await addUserToRoom(pending.room_id, pending.requester_socket_id, pending.requester_username);
+      activeConnections.set(pending.requester_socket_id, { roomId: pending.room_id, username: pending.requester_username });
+      const requesterSocket = io.sockets.sockets.get(pending.requester_socket_id);
+      if (requesterSocket) requesterSocket.join(pending.room_id);
+      const messages = await getRoomMessages(pending.room_id);
+      const users = await getRoomUsers(pending.room_id);
+      io.to(pending.requester_socket_id).emit("join-approved", {
+        roomId: pending.room_id,
+        roomName: room.name,
+        roomDescription: room.description,
+        roomCode: room.code,
+        maxUsers: room.maxUsers,
+        createdByUsername: room.createdByUsername,
+        messages,
+        users: users.map((u) => u.username),
+        userCount: users.length,
+      });
+      socket.to(pending.room_id).emit("user-joined", { username: pending.requester_username, userId: pending.requester_socket_id });
+      io.to(pending.room_id).emit("room-update", { userCount: users.length, users: users.map((u) => u.username) });
+      await deletePendingJoinRequest(requestId);
+    } catch (error) {
+      console.error("Error accepting join request:", error);
+      socket.emit("error", { message: "Failed to accept request" });
+    }
+  });
+
+  socket.on("join-request-decline", async ({ requestId }) => {
+    try {
+      const connection = activeConnections.get(socket.id);
+      if (!connection) return;
+      const pending = await getPendingJoinRequest(requestId);
+      if (!pending) return;
+      const room = await getRoomById(pending.room_id);
+      if (!room) return;
+      if (room.createdByUsername !== connection.username) {
+        socket.emit("error", { message: "Only the room creator can decline join requests" });
+        return;
+      }
+      await deletePendingJoinRequest(requestId);
+      io.to(pending.requester_socket_id).emit("join-declined", { roomId: pending.room_id, roomName: room.name });
+    } catch (error) {
+      console.error("Error declining join request:", error);
+    }
+  });
+
+  socket.on("remove-member", async ({ roomId, targetUsername }) => {
+    try {
+      const connection = activeConnections.get(socket.id);
+      if (!connection || connection.roomId !== roomId) {
+        socket.emit("error", { message: "You are not in this room" });
+        return;
+      }
+      const room = await getRoomById(roomId);
+      if (!room) return;
+      if (room.createdByUsername !== connection.username) {
+        socket.emit("error", { message: "Only the room creator can remove members" });
+        return;
+      }
+      if (connection.username === targetUsername) {
+        socket.emit("error", { message: "Use Leave to exit the room yourself" });
+        return;
+      }
+      const removed = await removeUserFromRoomByUsername(roomId, targetUsername);
+      if (!removed) {
+        socket.emit("error", { message: "User not found in room" });
+        return;
+      }
+      activeConnections.delete(removed.socket_id);
+      const removedSocket = io.sockets.sockets.get(removed.socket_id);
+      if (removedSocket) removedSocket.leave(roomId);
+      io.to(removed.socket_id).emit("removed-from-room", { roomId, roomName: room.name });
+      socket.to(roomId).emit("user-left", { username: targetUsername });
+      const users = await getRoomUsers(roomId);
+      io.to(roomId).emit("room-update", { userCount: users.length, users: users.map((u) => u.username) });
+    } catch (error) {
+      console.error("Error removing member:", error);
+      socket.emit("error", { message: "Failed to remove member" });
+    }
+  });
+
+  socket.on("send-message", async ({ message, type = "text", location, replyToMessageId }) => {
     try {
       const connection = activeConnections.get(socket.id);
       if (!connection) return;
@@ -254,7 +432,6 @@ io.on("connection", (socket) => {
       const room = await getRoomById(roomId);
       if (!room) return;
 
-      // For location messages, we need to handle the additional data
       let messageContent = message;
       let locationData = null;
 
@@ -269,16 +446,18 @@ io.on("connection", (socket) => {
           text: message,
           location: locationData,
         });
+      } else if (type === "announcement") {
+        messageContent = JSON.stringify({ text: message, type: "announcement" });
       }
 
-      // Save message to database
-      const messageData = await saveMessage(roomId, username, messageContent);
+      const messageData = await saveMessage(roomId, username, messageContent, replyToMessageId || null);
 
       // Add additional data for real-time broadcast
       const fullMessageData = {
         ...messageData,
         type,
         userId: socket.id,
+        replyToMessageId: messageData.replyToMessageId ?? undefined,
       };
 
       // If it's a location message, parse and add location data to the broadcast
@@ -292,6 +471,12 @@ io.on("connection", (socket) => {
     } catch (error) {
       console.error("Error sending message:", error);
     }
+  });
+
+  socket.on("message-delivered", ({ messageId, roomId }) => {
+    const connection = activeConnections.get(socket.id);
+    if (!connection || connection.roomId !== roomId) return;
+    io.to(roomId).emit("message-delivered", { messageId });
   });
 
   socket.on("start-negotiation", ({ proposal }) => {

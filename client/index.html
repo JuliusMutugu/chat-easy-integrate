@@ -3,31 +3,167 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Simple Messaging Platform</title>
+  <title>Messaging Platform</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>
+    :root {
+      /* Navy blue scale */
+      --navy-900: #0d2137;
+      --navy-800: #1a365d;
+      --navy-700: #2c5282;
+      --navy-600: #2b6cb0;
+      --navy-500: #3182ce;
+      --navy-100: #ebf8ff;
+      /* Green scale */
+      --green-800: #276749;
+      --green-700: #2d6a4f;
+      --green-600: #40916c;
+      --green-500: #52b788;
+      --green-400: #74c69d;
+      --green-100: #d8f3dc;
+      /* White and neutrals */
+      --white: #ffffff;
+      --gray-50: #f8fafc;
+      --gray-100: #f1f5f9;
+      --gray-200: #e2e8f0;
+      --gray-300: #cbd5e1;
+      --gray-500: #64748b;
+      --gray-700: #334155;
+      --gray-900: #0f172a;
+      /* Semantic - light */
+      --bg-primary: var(--white);
+      --bg-secondary: var(--gray-50);
+      --bg-navy: var(--navy-800);
+      --accent: var(--green-600);
+      --accent-hover: var(--green-700);
+      --text-primary: var(--gray-900);
+      --text-secondary: var(--gray-500);
+      --border: var(--gray-200);
+      --card-bg: var(--white);
+      --input-bg: var(--white);
+      --overlay-bg: rgba(13, 33, 55, 0.6);
+      /* Motion */
+      --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+      --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+      --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+      --duration-fast: 150ms;
+      --duration-normal: 250ms;
+      --duration-slow: 400ms;
+      --duration-slower: 600ms;
+    }
+
+    [data-theme="dark"] {
+      --white: #0f172a;
+      --gray-50: #1e293b;
+      --gray-100: #334155;
+      --gray-200: #475569;
+      --gray-300: #64748b;
+      --gray-500: #94a3b8;
+      --gray-700: #cbd5e1;
+      --gray-900: #f1f5f9;
+      --navy-100: #1e3a5f;
+      --navy-800: #1a365d;
+      --navy-900: #0d2137;
+      --green-100: #1a3d2e;
+      --green-400: #2d6a4f;
+      --green-500: #40916c;
+      --green-600: #52b788;
+      --green-700: #74c69d;
+      --bg-primary: #0f172a;
+      --bg-secondary: #1e293b;
+      --text-primary: #f1f5f9;
+      --text-secondary: #94a3b8;
+      --border: #334155;
+      --card-bg: #1e293b;
+      --input-bg: #334155;
+      --overlay-bg: rgba(0, 0, 0, 0.75);
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) {
+        --white: #0f172a;
+        --gray-50: #1e293b;
+        --gray-100: #334155;
+        --gray-200: #475569;
+        --gray-300: #64748b;
+        --gray-500: #94a3b8;
+        --gray-700: #cbd5e1;
+        --gray-900: #f1f5f9;
+        --navy-100: #1e3a5f;
+        --bg-primary: #0f172a;
+        --bg-secondary: #1e293b;
+        --text-primary: #f1f5f9;
+        --text-secondary: #94a3b8;
+        --border: #334155;
+        --card-bg: #1e293b;
+        --input-bg: #334155;
+        --overlay-bg: rgba(0, 0, 0, 0.75);
+      }
+    }
+
     * {
       margin: 0;
       padding: 0;
       box-sizing: border-box;
     }
-    
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      min-height: 100vh;
+
+    html {
+      scroll-behavior: smooth;
+      scroll-padding-top: 5rem;
     }
-    
+
+    @media (prefers-reduced-motion: reduce) {
+      html {
+        scroll-behavior: auto;
+      }
+      *,
+      *::before,
+      *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+      }
+    }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg-secondary);
+      color: var(--text-primary);
+      min-height: 100vh;
+      -webkit-font-smoothing: antialiased;
+      transition: background-color var(--duration-normal) var(--ease-in-out),
+        color var(--duration-normal) var(--ease-in-out);
+    }
+
     #app {
       min-height: 100vh;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 20px;
+    }
+
+    .focus-ring:focus-visible {
+      outline: 2px solid var(--green-500);
+      outline-offset: 2px;
     }
   </style>
 </head>
 <body>
   <div id="app"></div>
+  <script>
+    (function() {
+      try {
+        var stored = localStorage.getItem('theme');
+        var prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+        if (stored === 'dark') {
+          document.documentElement.setAttribute('data-theme', 'dark');
+        } else if (stored === 'light') {
+          document.documentElement.setAttribute('data-theme', 'light');
+        } else if (prefersDark) {
+          document.documentElement.setAttribute('data-theme', 'dark');
+        }
+      } catch (e) {}
+    })();
+  </script>
   <script type="module" src="/src/main.js"></script>
 </body>
 </html>

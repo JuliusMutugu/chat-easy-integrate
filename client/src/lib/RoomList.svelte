@@ -1,15 +1,22 @@
 <script>
+  import { playClick, playSuccess } from "./theme.js";
+
   export let rooms = [];
   export const config = {};
   export let inviteRoom = null;
+  export let inviteToken = null;
   export let onCreateRoom = () => {};
   export let onJoinRoom = () => {};
+  export let onRequestJoin = () => {};
   export let onRefresh = () => {};
 
   let showInviteModal = false;
   let selectedRoom = null;
   let inviteEmail = "";
   let inviteLink = "";
+  let searchQuery = "";
+  let sortBy = "name";
+  let showOptionsMenu = false;
 
   function formatTime(date) {
     return new Date(date).toLocaleTimeString([], {
@@ -20,7 +27,6 @@
 
   function showInvite(room) {
     selectedRoom = room;
-    // Use the persistent invite link from the server
     inviteLink =
       room.inviteLink ||
       `${window.location.origin}?room=${room.id}&invite=true`;
@@ -29,25 +35,22 @@
 
   async function generateNewInviteLink() {
     if (!selectedRoom) return;
-
     try {
       const response = await fetch(
         `${config.serverUrl}/api/rooms/${selectedRoom.id}/invite`,
         {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({}),
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ invitedBy: config.username || "" }),
         }
       );
-
       if (response.ok) {
         const data = await response.json();
         inviteLink = data.inviteLink;
-        showToast("New invite link generated!");
+        showToast("New invite link generated.");
       } else {
-        showToast("Failed to generate new invite link.");
+        const err = await response.json().catch(() => ({}));
+        showToast(err.error || "Failed to generate new invite link.");
       }
     } catch (error) {
       showToast("Error generating invite link.");
@@ -56,39 +59,37 @@
 
   function copyInviteLink() {
     navigator.clipboard.writeText(inviteLink);
-    showToast("Invite link copied to clipboard!");
+    playSuccess();
+    showToast("Invite link copied.");
   }
 
   function copyRoomCode() {
     navigator.clipboard.writeText(selectedRoom.code);
-    showToast("Room code copied to clipboard!");
+    playSuccess();
+    showToast("Room code copied.");
   }
 
   function sendEmailInvite() {
     if (!inviteEmail.trim()) return;
-
     const subject = `Join ${selectedRoom.name} - Room Code: ${selectedRoom.code}`;
-    const body = `🎯 You're invited to join "${selectedRoom.name}"!
+    const body = `You're invited to join "${selectedRoom.name}".
 
-📋 Quick Join Options:
-• Room Code: ${selectedRoom.code}
-• Direct Link: ${inviteLink}
+Quick join:
+- Room Code: ${selectedRoom.code}
+- Direct Link: ${inviteLink}
 
-📝 Description: ${selectedRoom.description}
+Description: ${selectedRoom.description}
 
-💡 How to join:
-1. Visit the messaging platform
+How to join:
+1. Visit the platform
 2. Enter room code: ${selectedRoom.code}
-3. Or click the direct link above
-
-Looking forward to chatting with you! 😊`;
+3. Or use the direct link above.`;
 
     const mailtoLink = `mailto:${inviteEmail}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-
     window.open(mailtoLink);
     inviteEmail = "";
     showInviteModal = false;
-    showToast("Email invitation opened!");
+    showToast("Email invitation opened.");
   }
 
   function closeInviteModal() {
@@ -99,271 +100,311 @@ Looking forward to chatting with you! 😊`;
   }
 
   function showToast(message) {
-    // Simple toast implementation
     const toast = document.createElement("div");
     toast.className = "toast-notification";
     toast.textContent = message;
     document.body.appendChild(toast);
-
-    setTimeout(() => {
-      toast.classList.add("show");
-    }, 100);
-
+    setTimeout(() => toast.classList.add("show"), 100);
     setTimeout(() => {
       toast.classList.remove("show");
       setTimeout(() => document.body.removeChild(toast), 300);
     }, 3000);
   }
+
+  $: filteredAndSortedRooms = (() => {
+    const q = searchQuery.trim().toLowerCase();
+    let list = rooms;
+    if (q) {
+      list = rooms.filter(
+        (r) =>
+          (r.name && r.name.toLowerCase().includes(q)) ||
+          (r.description && r.description.toLowerCase().includes(q)) ||
+          (String(r.code) && String(r.code).includes(q))
+      );
+    }
+    if (sortBy === "name") {
+      return [...list].sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+    }
+    if (sortBy === "code") {
+      return [...list].sort((a, b) => (a.code || 0) - (b.code || 0));
+    }
+    return list;
+  })();
 </script>
 
 <div class="room-list">
-  <div class="room-list-header">
-    <h3>🏠 Available Rooms</h3>
-    <div class="header-actions">
-      <button class="refresh-btn" onclick={onRefresh}>🔄</button>
-      <button class="create-btn" onclick={onCreateRoom}>➕ Create Room</button>
+  <div class="list-header">
+    <h3 class="list-title">Messaging</h3>
+    <div class="list-actions">
+      <div class="search-wrap">
+        <input
+          type="search"
+          class="search-input"
+          placeholder="Search rooms by name or code..."
+          bind:value={searchQuery}
+          aria-label="Search rooms"
+        />
+      </div>
+      <div class="options-wrap">
+        <button
+          type="button"
+          class="btn-icon btn-options"
+          onclick={() => (showOptionsMenu = !showOptionsMenu)}
+          aria-expanded={showOptionsMenu}
+          aria-haspopup="true"
+          aria-label="Options"
+        >
+          Options
+        </button>
+        {#if showOptionsMenu}
+          <div class="options-dropdown" role="menu">
+            <button type="button" class="options-item" role="menuitem" onclick={() => { sortBy = "name"; showOptionsMenu = false; }}>
+              Sort by name
+            </button>
+            <button type="button" class="options-item" role="menuitem" onclick={() => { sortBy = "code"; showOptionsMenu = false; }}>
+              Sort by code
+            </button>
+            <button type="button" class="options-item" role="menuitem" onclick={() => { playClick(); onRefresh(); showOptionsMenu = false; }}>
+              Refresh list
+            </button>
+          </div>
+        {/if}
+      </div>
+      <button type="button" class="btn-primary" onclick={() => { playClick(); onCreateRoom(); }}>Create room</button>
     </div>
   </div>
 
   {#if rooms.length === 0}
-    <div class="empty-state">
-      <div class="empty-icon">🏠</div>
+    <div class="empty">
+      <div class="empty-icon" aria-hidden="true"></div>
       <h4>No rooms available</h4>
-      <p>Create the first room to start chatting!</p>
-      <button class="create-first-btn" onclick={onCreateRoom}
-        >Create Room</button
-      >
+      <p>Create the first room to start.</p>
+      <button type="button" class="btn-primary" onclick={onCreateRoom}>Create room</button>
+    </div>
+  {:else if filteredAndSortedRooms.length === 0}
+    <div class="empty">
+      <div class="empty-icon" aria-hidden="true"></div>
+      <h4>No rooms match your search</h4>
+      <p>Try a different search term or clear the search.</p>
+      <button type="button" class="btn-primary" onclick={() => (searchQuery = "")}>Clear search</button>
     </div>
   {:else}
     {#if inviteRoom}
-      <div class="invite-room-section">
-        <h4>🎯 You're invited to join:</h4>
-        <div class="room-card invite-highlight">
-          <div class="room-header">
-            <h4>{inviteRoom.name}</h4>
-            <div class="room-badges">
-              <span class="invite-badge">📤 Invited</span>
-            </div>
+      <div class="invite-hero">
+        <div class="invite-hero-inner">
+          <div class="invite-hero-icon" aria-hidden="true">
+            <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>
           </div>
-
-          <p class="room-description">{inviteRoom.description}</p>
-
-          <div class="room-stats">
-            <span class="user-count"
-              >👥 {inviteRoom.userCount}/{inviteRoom.maxUsers}</span
-            >
-            <span
-              class="room-status"
-              class:full={inviteRoom.userCount >= inviteRoom.maxUsers}
-            >
-              {inviteRoom.userCount >= inviteRoom.maxUsers
-                ? "Full"
-                : "Available"}
-            </span>
+          <h2 class="invite-hero-title">You're invited</h2>
+          <p class="invite-hero-subtitle">Join <strong>{inviteRoom.name}</strong></p>
+          {#if inviteRoom.description}
+            <p class="invite-hero-desc">{inviteRoom.description}</p>
+          {/if}
+          <div class="invite-hero-meta">
+            <span class="invite-hero-count">{inviteRoom.userCount} of {inviteRoom.maxUsers} online</span>
+            {#if inviteRoom.userCount >= inviteRoom.maxUsers}
+              <span class="invite-hero-full">Room full</span>
+            {/if}
           </div>
-
-          <div class="room-actions">
-            <button
-              class="join-btn priority"
-              disabled={inviteRoom.userCount >= inviteRoom.maxUsers}
-              onclick={() => onJoinRoom(inviteRoom)}
-            >
-              {inviteRoom.userCount >= inviteRoom.maxUsers
-                ? "Room Full"
-                : "🚀 Join Now"}
-            </button>
+          <div class="invite-hero-actions">
+            {#if inviteToken}
+              <button
+                type="button"
+                class="invite-cta invite-cta-request"
+                disabled={inviteRoom.userCount >= inviteRoom.maxUsers}
+                onclick={() => { playSuccess(); onRequestJoin(inviteToken); }}
+              >
+                <span class="invite-cta-label">Request to join</span>
+                <span class="invite-cta-hint">Creator will approve your request</span>
+              </button>
+            {:else}
+              <button
+                type="button"
+                class="invite-cta invite-cta-join"
+                disabled={inviteRoom.userCount >= inviteRoom.maxUsers}
+                onclick={() => { playSuccess(); onJoinRoom(inviteRoom); }}
+              >
+                Join now
+              </button>
+            {/if}
           </div>
         </div>
       </div>
     {/if}
 
     <div class="rooms-grid">
-      {#each rooms as room}
-        <div
-          class="room-card"
-          class:negotiation-active={room.isNegotiationActive}
-        >
-          <div class="room-header">
+      {#each filteredAndSortedRooms as room}
+        <article class="room-card" class:negotiating={room.isNegotiationActive}>
+          <div class="card-top">
             <h4>{room.name}</h4>
-            <div class="room-badges">
+            <div class="card-badges">
               {#if room.isNegotiationActive}
-                <span class="negotiation-badge">🤝 Negotiating</span>
+                <span class="badge negotiating">Negotiating</span>
               {/if}
-              <button
-                class="invite-btn"
-                onclick={() => showInvite(room)}
-                title="Invite others"
-              >
-                📤
-              </button>
+              {#if room.createdByUsername === config.username}
+                <button
+                  type="button"
+                  class="btn-icon small"
+                  onclick={() => showInvite(room)}
+                  title="Invite others (creator only)"
+                  aria-label="Invite to room"
+                >
+                  Invite
+                </button>
+              {/if}
             </div>
           </div>
-
-          <p class="room-description">{room.description}</p>
-
-          <div class="room-code-badge">
-            <span class="code-label">Code:</span>
+          <p class="card-desc">{room.description}</p>
+          <div class="code-badge">
+            <span class="code-label">Code</span>
             <span class="code-value">{room.code}</span>
           </div>
-
-          <div class="room-stats">
-            <span class="user-count">👥 {room.userCount}/{room.maxUsers}</span>
-            <span
-              class="room-status"
-              class:full={room.userCount >= room.maxUsers}
-            >
+          <div class="card-meta">
+            <span>{room.userCount}/{room.maxUsers} online</span>
+            <span class="status-tag" class:full={room.userCount >= room.maxUsers}>
               {room.userCount >= room.maxUsers ? "Full" : "Available"}
             </span>
           </div>
-
-          <div class="room-actions">
+          <div class="card-actions">
             <button
-              class="join-btn"
+              type="button"
+              class="btn-join"
               disabled={room.userCount >= room.maxUsers}
-              onclick={() => onJoinRoom(room)}
+              onclick={() => { playClick(); onJoinRoom(room); }}
             >
-              {room.userCount >= room.maxUsers ? "Room Full" : "Join Room"}
+              {room.userCount >= room.maxUsers ? "Room full" : "Join"}
             </button>
           </div>
-        </div>
+        </article>
       {/each}
     </div>
   {/if}
 
-  <!-- Invitation Modal -->
   {#if showInviteModal && selectedRoom}
-    <div class="modal-overlay" onclick={closeInviteModal}>
-      <div class="invite-modal" onclick={(e) => e.stopPropagation()}>
+    <div
+      class="modal-backdrop"
+      role="presentation"
+      onclick={closeInviteModal}
+      onkeydown={(e) => e.key === 'Escape' && closeInviteModal()}
+    >
+      <div
+        class="modal"
+        role="dialog"
+        tabindex="-1"
+        aria-labelledby="invite-modal-title"
+        onclick={(e) => e.stopPropagation()}
+        onkeydown={(e) => e.stopPropagation()}
+      >
         <div class="modal-header">
-          <h3>📤 Invite to "{selectedRoom.name}"</h3>
-          <button class="close-modal-btn" onclick={closeInviteModal}>✕</button>
+          <h3 id="invite-modal-title">Invite to "{selectedRoom.name}"</h3>
+          <button type="button" class="btn-icon close" onclick={closeInviteModal} aria-label="Close">Close</button>
         </div>
 
-        <div class="modal-content">
-          <div class="invite-section">
-            <h4>🎯 Room Code</h4>
-            <div class="code-container">
-              <div class="room-code-display">
-                <span class="room-code">{selectedRoom.code}</span>
+        <div class="modal-body">
+          <section class="invite-section">
+            <h4>Room code</h4>
+            <div class="code-row">
+              <div class="code-display">
+                <span class="code-value">{selectedRoom.code}</span>
                 <small>Share this code for easy access</small>
               </div>
-              <button class="copy-btn" onclick={copyRoomCode}
-                >📋 Copy Code</button
-              >
+              <button type="button" class="btn-secondary" onclick={copyRoomCode}>Copy code</button>
             </div>
-          </div>
+          </section>
 
-          <div class="invite-section">
-            <h4>🔗 Direct Link</h4>
-            <div class="link-container">
-              <input
-                type="text"
-                readonly
-                value={inviteLink}
-                class="invite-link-input"
-              />
-              <button class="copy-btn" onclick={copyInviteLink}
-                >📋 Copy Link</button
-              >
+          <section class="invite-section">
+            <h4>Direct link</h4>
+            <div class="link-row">
+              <input type="text" readonly value={inviteLink} class="link-input" />
+              <button type="button" class="btn-secondary" onclick={copyInviteLink}>Copy link</button>
             </div>
-            <div class="link-actions">
-              <button class="generate-btn" onclick={generateNewInviteLink}
-                >🔄 Generate New Link</button
-              >
-              <small class="link-note"
-                >Generate a new link if security is compromised</small
-              >
+            <div class="link-extra">
+              <button type="button" class="btn-text" onclick={generateNewInviteLink}>Generate new link</button>
+              <small>Use if the current link is compromised</small>
             </div>
-          </div>
+          </section>
 
-          <div class="invite-section">
-            <h4>📧 Email Invitation</h4>
-            <div class="email-container">
+          <section class="invite-section">
+            <h4>Email invitation</h4>
+            <div class="email-row">
               <input
                 type="email"
                 bind:value={inviteEmail}
-                placeholder="Enter email address..."
+                placeholder="Enter email address"
                 class="email-input"
               />
               <button
-                class="send-btn"
+                type="button"
+                class="btn-primary"
                 onclick={sendEmailInvite}
                 disabled={!inviteEmail.trim()}
               >
-                📧 Send
+                Send
               </button>
             </div>
-          </div>
+          </section>
 
-          <div class="invite-section">
-            <h4>📱 Share on Social Platforms</h4>
-            <div class="quick-share">
+          <section class="invite-section">
+            <h4>Share</h4>
+            <div class="share-row">
               <button
-                class="share-btn whatsapp"
+                type="button"
+                class="btn-share"
                 onclick={() =>
                   window.open(
-                    `https://wa.me/?text=${encodeURIComponent(`🎯 Join me in "${selectedRoom.name}"!\n\n💬 Room Code: ${selectedRoom.code}\n🔗 Direct Link: ${inviteLink}\n\n📝 ${selectedRoom.description}`)}`
+                    `https://wa.me/?text=${encodeURIComponent(`Join "${selectedRoom.name}". Room Code: ${selectedRoom.code}. Link: ${inviteLink}`)}`
                   )}
               >
-                💬 WhatsApp
+                WhatsApp
               </button>
               <button
-                class="share-btn telegram"
+                type="button"
+                class="btn-share"
                 onclick={() =>
                   window.open(
-                    `https://t.me/share/url?url=${encodeURIComponent(inviteLink)}&text=${encodeURIComponent(`🎯 Join "${selectedRoom.name}"!\n💬 Room Code: ${selectedRoom.code}`)}`
+                    `https://t.me/share/url?url=${encodeURIComponent(inviteLink)}&text=${encodeURIComponent(`Join "${selectedRoom.name}". Code: ${selectedRoom.code}`)}`
                   )}
               >
-                ✈️ Telegram
+                Telegram
               </button>
               <button
-                class="share-btn twitter"
+                type="button"
+                class="btn-share"
                 onclick={() =>
                   window.open(
-                    `https://twitter.com/intent/tweet?text=${encodeURIComponent(`🎯 Join me for a discussion in "${selectedRoom.name}"!\n💬 Room Code: ${selectedRoom.code}`)}&url=${encodeURIComponent(inviteLink)}`
+                    `https://twitter.com/intent/tweet?text=${encodeURIComponent(`Join "${selectedRoom.name}". Code: ${selectedRoom.code}`)}&url=${encodeURIComponent(inviteLink)}`
                   )}
               >
-                🐦 Twitter
-              </button>
-              <button
-                class="share-btn messenger"
-                onclick={() =>
-                  window.open(
-                    `https://www.facebook.com/dialog/send?link=${encodeURIComponent(inviteLink)}&app_id=YOUR_APP_ID`
-                  )}
-              >
-                📧 Messenger
+                Twitter
               </button>
             </div>
-          </div>
+          </section>
 
-          <div class="invite-section">
-            <h4>📋 Quick Copy Messages</h4>
-            <div class="quick-messages">
+          <section class="invite-section">
+            <h4>Quick copy</h4>
+            <div class="copy-row">
               <button
-                class="message-btn"
+                type="button"
+                class="btn-outline"
                 onclick={() => {
-                  navigator.clipboard.writeText(
-                    `Hey! Join me in "${selectedRoom.name}" - Room Code: ${selectedRoom.code}`
-                  );
-                  showToast("Message copied!");
+                  navigator.clipboard.writeText(`Join "${selectedRoom.name}" - Room Code: ${selectedRoom.code}`);
+                  showToast("Message copied.");
                 }}
               >
-                💬 Simple Message
+                Simple message
               </button>
               <button
-                class="message-btn"
+                type="button"
+                class="btn-outline"
                 onclick={() => {
-                  navigator.clipboard.writeText(
-                    `🎯 You're invited to join "${selectedRoom.name}"!\n\n💬 Room Code: ${selectedRoom.code}\n🔗 Link: ${inviteLink}\n\n📝 ${selectedRoom.description}`
-                  );
-                  showToast("Detailed message copied!");
+                  navigator.clipboard.writeText(`You're invited to "${selectedRoom.name}". Code: ${selectedRoom.code}. Link: ${inviteLink}. ${selectedRoom.description}`);
+                  showToast("Detailed message copied.");
                 }}
               >
-                📄 Detailed Message
+                Detailed message
               </button>
             </div>
-          </div>
+          </section>
         </div>
       </div>
     </div>
@@ -372,210 +413,369 @@ Looking forward to chatting with you! 😊`;
 
 <style>
   .room-list {
-    padding: 20px;
+    padding: 1.5rem;
     height: 100%;
     overflow-y: auto;
   }
 
-  .room-list-header {
+  .list-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 20px;
+    margin-bottom: 1.5rem;
     flex-wrap: wrap;
-    gap: 10px;
+    gap: 0.75rem;
   }
 
-  .room-list-header h3 {
+  .list-title {
     margin: 0;
-    color: #333;
-    font-size: 1.3em;
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: var(--navy-900);
   }
 
-  .header-actions {
+  .list-actions {
     display: flex;
-    gap: 10px;
+    gap: 0.5rem;
     align-items: center;
+    flex-wrap: wrap;
   }
 
-  .refresh-btn {
-    background: #f5f5f5;
-    border: 1px solid #ddd;
+  .search-wrap {
+    flex: 1;
+    min-width: 180px;
+    max-width: 320px;
+  }
+
+  .search-input {
+    width: 100%;
+    padding: 0.5rem 0.75rem;
+    border: 2px solid var(--border);
     border-radius: 8px;
-    padding: 8px 12px;
-    cursor: pointer;
-    font-size: 14px;
-    transition: all 0.3s;
+    font-size: 0.875rem;
+    font-family: inherit;
+    background: var(--input-bg);
+    color: var(--text-primary);
+    transition: border-color 0.15s ease;
   }
 
-  .refresh-btn:hover {
-    background: #e9e9e9;
-    transform: rotate(180deg);
+  .search-input:focus {
+    outline: none;
+    border-color: var(--green-600);
   }
 
-  .create-btn,
-  .create-first-btn {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    color: white;
-    border: none;
-    border-radius: 8px;
-    padding: 10px 16px;
-    cursor: pointer;
-    font-weight: 500;
-    transition: all 0.3s;
+  .search-input::placeholder {
+    color: var(--text-secondary);
   }
 
-  .create-btn:hover,
-  .create-first-btn:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+  .options-wrap {
+    position: relative;
   }
 
-  .empty-state {
-    text-align: center;
-    padding: 60px 20px;
-    color: #666;
-  }
-
-  .empty-icon {
-    font-size: 4em;
-    margin-bottom: 20px;
-  }
-
-  .empty-state h4 {
-    margin-bottom: 10px;
-    color: #333;
-  }
-
-  .empty-state p {
-    margin-bottom: 30px;
-    font-size: 14px;
-  }
-
-  .invite-room-section {
-    margin-bottom: 30px;
-    padding: 20px;
-    background: linear-gradient(135deg, #fff3e0 0%, #ffffff 100%);
-    border-radius: 12px;
-    border: 2px solid #ff9800;
-  }
-
-  .invite-room-section h4 {
-    margin: 0 0 15px 0;
-    color: #e65100;
-    font-size: 1.1em;
-    text-align: center;
-  }
-
-  .invite-highlight {
-    border: 2px solid #ff9800 !important;
-    background: linear-gradient(135deg, #fff8e1 0%, #ffffff 100%) !important;
-    box-shadow: 0 8px 25px rgba(255, 152, 0, 0.2) !important;
-    transform: scale(1.02);
-  }
-
-  .invite-badge {
-    background: #ff9800;
-    color: white;
-    font-size: 11px;
-    padding: 4px 8px;
-    border-radius: 12px;
-    font-weight: 500;
+  .btn-options {
     white-space: nowrap;
   }
 
-  .join-btn.priority {
-    background: linear-gradient(135deg, #ff9800 0%, #f57c00 100%);
-    font-weight: 600;
-    box-shadow: 0 4px 15px rgba(255, 152, 0, 0.3);
+  .options-dropdown {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    margin-top: 4px;
+    min-width: 160px;
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+    z-index: 20;
+    padding: 0.25rem 0;
   }
 
-  .join-btn.priority:hover:not(:disabled) {
-    box-shadow: 0 6px 20px rgba(255, 152, 0, 0.5);
+  .options-item {
+    display: block;
+    width: 100%;
+    text-align: left;
+    padding: 0.5rem 1rem;
+    border: none;
+    background: none;
+    color: var(--text-primary);
+    font-size: 0.875rem;
+    font-family: inherit;
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+  }
+
+  .options-item:hover {
+    background: var(--bg-secondary);
+  }
+
+  .btn-icon {
+    background: var(--gray-100);
+    border: 1px solid var(--border);
+    color: var(--gray-700);
+    padding: 0.5rem 1rem;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 0.875rem;
+    font-weight: 500;
+    font-family: inherit;
+    transition: background-color 0.15s ease, border-color 0.15s ease;
+  }
+
+  .btn-icon:hover {
+    background: var(--gray-200);
+    border-color: var(--gray-300);
+  }
+
+  .btn-icon.small {
+    padding: 0.375rem 0.75rem;
+    font-size: 0.8125rem;
+  }
+
+  .btn-primary {
+    background: var(--green-600);
+    color: var(--white);
+    border: none;
+    padding: 0.5rem 1.25rem;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 0.9375rem;
+    font-family: inherit;
+    transition: background-color 0.15s ease, transform 0.2s var(--ease-spring);
+  }
+
+  .btn-primary:hover:not(:disabled) {
+    background: var(--green-700);
+    transform: translateY(-1px);
+  }
+
+  .btn-primary:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
+  }
+
+  .empty {
+    text-align: center;
+    padding: 4rem 2rem;
+    color: var(--gray-600);
+  }
+
+  .empty-icon {
+    width: 64px;
+    height: 64px;
+    margin: 0 auto 1.5rem;
+    background: var(--gray-200);
+    border-radius: 16px;
+  }
+
+  .empty h4 {
+    margin: 0 0 0.5rem;
+    font-size: 1.125rem;
+    color: var(--navy-900);
+  }
+
+  .empty p {
+    margin: 0 0 1.5rem;
+    font-size: 0.9375rem;
+  }
+
+  .invite-hero {
+    margin-bottom: 2rem;
+    padding: 2rem;
+    background: linear-gradient(135deg, var(--green-50) 0%, var(--navy-50) 100%);
+    border: 1px solid var(--green-200);
+    border-radius: 16px;
+    box-shadow: 0 4px 24px rgba(45, 106, 79, 0.08);
+  }
+
+  .invite-hero-inner {
+    max-width: 400px;
+    margin: 0 auto;
+    text-align: center;
+  }
+
+  .invite-hero-icon {
+    width: 56px;
+    height: 56px;
+    margin: 0 auto 1rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--green-100);
+    border-radius: 14px;
+    color: var(--green-700);
+  }
+
+  .invite-hero-title {
+    margin: 0 0 0.25rem;
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--navy-900);
+    letter-spacing: -0.02em;
+  }
+
+  .invite-hero-subtitle {
+    margin: 0 0 0.5rem;
+    font-size: 1.0625rem;
+    color: var(--gray-700);
+  }
+
+  .invite-hero-subtitle strong {
+    color: var(--navy-800);
+  }
+
+  .invite-hero-desc {
+    margin: 0 0 1rem;
+    font-size: 0.9375rem;
+    color: var(--gray-600);
+    line-height: 1.45;
+  }
+
+  .invite-hero-meta {
+    margin-bottom: 1.5rem;
+    font-size: 0.8125rem;
+    color: var(--gray-500);
+  }
+
+  .invite-hero-full {
+    display: inline-block;
+    margin-left: 0.5rem;
+    padding: 0.2rem 0.5rem;
+    background: var(--gray-200);
+    color: var(--gray-700);
+    border-radius: 6px;
+    font-weight: 600;
+  }
+
+  .invite-hero-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    align-items: center;
+  }
+
+  .invite-cta {
+    min-width: 220px;
+    padding: 0.875rem 1.5rem;
+    border-radius: 12px;
+    font-weight: 600;
+    font-size: 1rem;
+    font-family: inherit;
+    cursor: pointer;
+    border: none;
+    transition: transform 0.2s var(--ease-spring), box-shadow 0.2s ease;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.25rem;
+  }
+
+  .invite-cta:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
+  }
+
+  .invite-cta-request {
+    background: var(--green-600);
+    color: var(--white);
+    box-shadow: 0 4px 14px rgba(45, 106, 79, 0.35);
+  }
+
+  .invite-cta-request:hover:not(:disabled) {
+    background: var(--green-700);
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(45, 106, 79, 0.4);
+  }
+
+  .invite-cta-label {
+    font-size: 1rem;
+  }
+
+  .invite-cta-hint {
+    font-size: 0.75rem;
+    font-weight: 500;
+    opacity: 0.9;
+  }
+
+  .invite-cta-join {
+    background: var(--navy-800);
+    color: var(--white);
+  }
+
+  .invite-cta-join:hover:not(:disabled) {
+    background: var(--navy-900);
+    transform: translateY(-2px);
   }
 
   .rooms-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-    gap: 20px;
+    gap: 1.25rem;
   }
 
   .room-card {
-    background: white;
-    border: 2px solid #e1e5e9;
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    transition: transform 0.25s var(--ease-spring), box-shadow 0.25s ease,
+      border-color 0.2s ease, background-color var(--duration-normal) var(--ease-in-out);
     border-radius: 12px;
-    padding: 20px;
-    transition: all 0.3s;
-    position: relative;
+    padding: 1.25rem;
+    transition: transform 0.25s var(--ease-spring), box-shadow 0.25s ease, border-color 0.2s ease;
   }
 
   .room-card:hover {
-    border-color: #667eea;
+    border-color: var(--navy-500);
+    box-shadow: 0 8px 24px rgba(13, 33, 55, 0.06);
     transform: translateY(-2px);
-    box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1);
   }
 
-  .room-card.negotiation-active {
-    border-color: #ff9800;
-    background: linear-gradient(135deg, #fff3e0 0%, #ffffff 100%);
+  .room-card.negotiating {
+    border-color: var(--green-400);
+    background: var(--green-100);
   }
 
-  .room-header {
+  .card-top {
     display: flex;
     justify-content: space-between;
     align-items: flex-start;
-    margin-bottom: 10px;
-    flex-wrap: wrap;
-    gap: 10px;
+    margin-bottom: 0.5rem;
+    gap: 0.5rem;
   }
 
-  .room-header h4 {
+  .card-top h4 {
     margin: 0;
-    color: #333;
-    font-size: 1.1em;
+    font-size: 1.0625rem;
+    font-weight: 600;
+    color: var(--navy-900);
     flex: 1;
   }
 
-  .room-badges {
+  .card-badges {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 0.5rem;
   }
 
-  .negotiation-badge {
-    background: #ff9800;
-    color: white;
-    font-size: 11px;
-    padding: 4px 8px;
-    border-radius: 12px;
-    font-weight: 500;
+  .badge {
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 0.25rem 0.5rem;
+    border-radius: 6px;
     white-space: nowrap;
   }
 
-  .invite-btn {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    border: none;
-    border-radius: 6px;
-    width: 28px;
-    height: 28px;
-    cursor: pointer;
-    font-size: 12px;
-    transition: all 0.3s;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+  .badge.negotiating {
+    background: var(--green-600);
+    color: var(--white);
   }
 
-  .invite-btn:hover {
-    transform: scale(1.1);
-    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
-  }
-
-  .room-description {
-    color: #666;
-    font-size: 14px;
-    margin-bottom: 15px;
+  .card-desc {
+    color: var(--gray-600);
+    font-size: 0.875rem;
     line-height: 1.4;
+    margin-bottom: 1rem;
     display: -webkit-box;
     -webkit-line-clamp: 2;
     line-clamp: 2;
@@ -583,389 +783,360 @@ Looking forward to chatting with you! 😊`;
     overflow: hidden;
   }
 
-  .room-code-badge {
-    background: #f1f3f4;
-    border: 1px solid #e1e5e9;
-    border-radius: 6px;
-    padding: 6px 10px;
-    margin-bottom: 15px;
+  .code-badge {
+    background: var(--gray-50);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.5rem 0.75rem;
+    margin-bottom: 1rem;
     text-align: center;
-    font-size: 13px;
+    font-size: 0.8125rem;
   }
 
   .code-label {
-    color: #666;
-    margin-right: 5px;
+    color: var(--gray-600);
+    margin-right: 0.375rem;
   }
 
   .code-value {
-    font-family: "Courier New", monospace;
-    font-weight: bold;
-    color: #333;
-    letter-spacing: 1px;
+    font-family: ui-monospace, monospace;
+    font-weight: 700;
+    color: var(--navy-800);
+    letter-spacing: 0.05em;
   }
 
-  .room-stats {
+  .card-meta {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 15px;
-    font-size: 13px;
+    margin-bottom: 1rem;
+    font-size: 0.8125rem;
+    color: var(--gray-600);
   }
 
-  .user-count {
-    color: #555;
+  .status-tag {
+    padding: 0.25rem 0.5rem;
+    border-radius: 6px;
+    font-weight: 600;
+    background: var(--green-100);
+    color: var(--green-800);
   }
 
-  .room-status {
-    padding: 4px 8px;
-    border-radius: 12px;
-    background: #e8f5e8;
-    color: #2e7d32;
-    font-weight: 500;
+  .status-tag.full {
+    background: var(--gray-200);
+    color: var(--gray-700);
   }
 
-  .room-status.full {
-    background: #ffebee;
-    color: #c62828;
+  .card-actions {
+    margin-top: 0;
   }
 
-  .room-actions {
-    margin-top: 15px;
-  }
-
-  .join-btn {
+  .btn-join {
     width: 100%;
-    background: linear-gradient(135deg, #4caf50 0%, #45a049 100%);
-    color: white;
+    background: var(--green-600);
+    color: var(--white);
     border: none;
     border-radius: 8px;
-    padding: 12px;
+    padding: 0.75rem 1rem;
     cursor: pointer;
-    font-weight: 500;
-    transition: all 0.3s;
+    font-weight: 600;
+    font-size: 0.9375rem;
+    font-family: inherit;
+    transition: background-color 0.15s ease, transform 0.2s var(--ease-spring);
   }
 
-  .join-btn:hover:not(:disabled) {
+  .btn-join:hover:not(:disabled) {
+    background: var(--green-700);
     transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(76, 175, 80, 0.4);
   }
 
-  .join-btn:disabled {
-    background: #ccc;
+  .btn-join:disabled {
+    background: var(--gray-300);
     cursor: not-allowed;
     transform: none;
   }
 
-  /* Modal Styles */
-  .modal-overlay {
+  /* Modal */
+  .modal-backdrop {
     position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background: rgba(0, 0, 0, 0.7);
+    inset: 0;
+    background: var(--overlay-bg);
     display: flex;
     align-items: center;
     justify-content: center;
     z-index: 2000;
-    padding: 20px;
+    padding: 1.5rem;
+    animation: overlayIn 0.2s var(--ease-out-expo);
   }
 
-  .invite-modal {
-    background: white;
+  .modal {
+    background: var(--bg-primary);
     border-radius: 16px;
     width: 100%;
-    max-width: 500px;
+    max-width: 480px;
     max-height: 90vh;
     overflow-y: auto;
-    box-shadow: 0 25px 50px rgba(0, 0, 0, 0.3);
+    box-shadow: 0 24px 48px rgba(0, 0, 0, 0.2);
+    animation: panelIn 0.3s var(--ease-out-expo);
   }
 
   .modal-header {
-    padding: 20px;
-    border-bottom: 1px solid #e1e5e9;
+    padding: 1.25rem 1.5rem;
+    border-bottom: 1px solid var(--border);
     display: flex;
     justify-content: space-between;
     align-items: center;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    color: white;
+    background: var(--navy-800);
+    color: var(--white);
     border-radius: 16px 16px 0 0;
   }
 
   .modal-header h3 {
     margin: 0;
-    font-size: 1.2em;
+    font-size: 1.125rem;
+    font-weight: 600;
   }
 
-  .close-modal-btn {
+  .btn-icon.close {
     background: rgba(255, 255, 255, 0.2);
+    color: var(--white);
     border: none;
-    color: white;
-    width: 30px;
-    height: 30px;
-    border-radius: 50%;
-    cursor: pointer;
-    font-size: 16px;
-    transition: background-color 0.3s;
   }
 
-  .close-modal-btn:hover {
+  .btn-icon.close:hover {
     background: rgba(255, 255, 255, 0.3);
   }
 
-  .modal-content {
-    padding: 20px;
+  .modal-body {
+    padding: 1.5rem;
   }
 
   .invite-section {
-    margin-bottom: 25px;
+    margin-bottom: 1.5rem;
+  }
+
+  .invite-section:last-child {
+    margin-bottom: 0;
   }
 
   .invite-section h4 {
-    margin: 0 0 12px 0;
-    color: #333;
-    font-size: 1em;
+    margin: 0 0 0.75rem;
+    font-size: 0.9375rem;
+    font-weight: 600;
+    color: var(--navy-900);
   }
 
-  .code-container {
+  .code-row,
+  .link-row,
+  .email-row {
     display: flex;
-    gap: 15px;
+    gap: 0.75rem;
     align-items: center;
   }
 
-  .room-code-display {
+  .code-display {
     flex: 1;
     text-align: center;
-    padding: 15px;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    border-radius: 12px;
-    color: white;
+    padding: 1rem;
+    background: var(--navy-800);
+    border-radius: 10px;
+    color: var(--white);
   }
 
-  .room-code {
+  .code-display .code-value {
     display: block;
-    font-size: 24px;
-    font-weight: bold;
-    font-family: "Courier New", monospace;
-    letter-spacing: 3px;
-    margin-bottom: 5px;
+    font-size: 1.5rem;
+    letter-spacing: 0.1em;
+    margin-bottom: 0.25rem;
+    color: var(--white);
   }
 
-  .room-code-display small {
-    font-size: 12px;
+  .code-display small {
+    font-size: 0.75rem;
     opacity: 0.9;
   }
 
-  .link-container,
-  .email-container {
-    display: flex;
-    gap: 10px;
-    align-items: center;
-  }
-
-  .invite-link-input,
+  .link-input,
   .email-input {
     flex: 1;
-    padding: 12px;
-    border: 2px solid #e1e5e9;
+    padding: 0.75rem 1rem;
+    border: 2px solid var(--border);
     border-radius: 8px;
-    font-size: 14px;
-    transition: border-color 0.3s;
+    font-size: 0.875rem;
+    font-family: inherit;
+    transition: border-color 0.15s ease;
   }
 
-  .invite-link-input:focus,
+  .link-input:focus,
   .email-input:focus {
     outline: none;
-    border-color: #667eea;
+    border-color: var(--green-600);
   }
 
-  .copy-btn,
-  .send-btn {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    color: white;
+  .btn-secondary {
+    background: var(--navy-800);
+    color: var(--white);
     border: none;
-    padding: 12px 16px;
+    padding: 0.75rem 1rem;
     border-radius: 8px;
     cursor: pointer;
-    font-size: 14px;
-    font-weight: 500;
-    transition: all 0.3s;
-    white-space: nowrap;
+    font-size: 0.875rem;
+    font-weight: 600;
+    font-family: inherit;
+    transition: background-color 0.15s ease;
   }
 
-  .copy-btn:hover,
-  .send-btn:hover:not(:disabled) {
-    transform: translateY(-2px);
-    box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+  .btn-secondary:hover {
+    background: var(--navy-900);
   }
 
-  .send-btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-    transform: none;
-  }
-
-  .link-actions {
-    margin-top: 10px;
+  .link-extra {
+    margin-top: 0.5rem;
     text-align: center;
   }
 
-  .generate-btn {
-    background: #8b5cf6;
-    color: white;
+  .btn-text {
+    background: none;
     border: none;
-    padding: 8px 16px;
-    border-radius: 6px;
+    color: var(--navy-600);
     cursor: pointer;
-    font-size: 13px;
+    font-size: 0.8125rem;
     font-weight: 500;
-    transition: all 0.3s;
-    margin-bottom: 5px;
+    font-family: inherit;
+    padding: 0.25rem 0;
   }
 
-  .generate-btn:hover {
-    background: #7c3aed;
-    transform: translateY(-1px);
+  .btn-text:hover {
+    color: var(--navy-800);
+    text-decoration: underline;
   }
 
-  .link-note {
+  .link-extra small {
     display: block;
-    color: #6b7280;
-    font-size: 12px;
-    margin-top: 5px;
+    color: var(--gray-500);
+    font-size: 0.75rem;
+    margin-top: 0.25rem;
   }
 
-  .quick-share {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
-    gap: 10px;
-  }
-
-  .share-btn {
-    padding: 10px 12px;
-    border: none;
-    border-radius: 8px;
-    cursor: pointer;
-    font-size: 14px;
-    font-weight: 500;
-    transition: all 0.3s;
-    text-align: center;
-  }
-
-  .share-btn.whatsapp {
-    background: #25d366;
-    color: white;
-  }
-
-  .share-btn.telegram {
-    background: #0088cc;
-    color: white;
-  }
-
-  .share-btn.twitter {
-    background: #1da1f2;
-    color: white;
-  }
-
-  .share-btn.messenger {
-    background: #006aff;
-    color: white;
-  }
-
-  .share-btn:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
-  }
-
-  .quick-messages {
+  .share-row {
     display: flex;
-    gap: 10px;
     flex-wrap: wrap;
+    gap: 0.5rem;
   }
 
-  .message-btn {
+  .btn-share {
+    padding: 0.5rem 1rem;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--gray-50);
+    color: var(--gray-800);
+    cursor: pointer;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    font-family: inherit;
+    transition: background-color 0.15s ease, border-color 0.15s ease;
+  }
+
+  .btn-share:hover {
+    background: var(--gray-100);
+    border-color: var(--gray-300);
+  }
+
+  .copy-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .btn-outline {
     flex: 1;
-    min-width: 150px;
-    background: #f8f9fa;
-    border: 2px solid #e1e5e9;
-    color: #333;
-    padding: 10px 15px;
+    min-width: 140px;
+    background: var(--white);
+    border: 2px solid var(--border);
+    color: var(--navy-800);
+    padding: 0.5rem 1rem;
     border-radius: 8px;
     cursor: pointer;
-    font-size: 14px;
+    font-size: 0.875rem;
     font-weight: 500;
-    transition: all 0.3s;
+    font-family: inherit;
+    transition: border-color 0.15s ease, background-color 0.15s ease;
   }
 
-  .message-btn:hover {
-    border-color: #667eea;
-    background: #f0f2ff;
-    transform: translateY(-1px);
+  .btn-outline:hover {
+    border-color: var(--green-600);
+    background: var(--green-100);
   }
 
-  /* Global Toast Styles */
   :global(.toast-notification) {
     position: fixed;
-    top: 20px;
-    right: 20px;
-    background: #4caf50;
-    color: white;
-    padding: 12px 20px;
+    top: 1.5rem;
+    right: 1.5rem;
+    background: var(--navy-800);
+    color: var(--white);
+    padding: 0.75rem 1.25rem;
     border-radius: 8px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
     z-index: 3000;
-    transform: translateX(100%);
-    transition: transform 0.3s ease;
+    font-size: 0.875rem;
     font-weight: 500;
+    transform: translateX(120%);
+    transition: transform 0.3s var(--ease-out-expo);
   }
 
   :global(.toast-notification.show) {
     transform: translateX(0);
   }
 
+  @keyframes overlayIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+
+  @keyframes panelIn {
+    from {
+      opacity: 0;
+      transform: scale(0.96) translateY(12px);
+    }
+    to {
+      opacity: 1;
+      transform: scale(1) translateY(0);
+    }
+  }
+
   @media (max-width: 768px) {
     .room-list {
-      padding: 15px;
+      padding: 1rem;
     }
 
     .rooms-grid {
       grid-template-columns: 1fr;
-      gap: 15px;
+      gap: 1rem;
     }
 
     .room-card {
-      padding: 15px;
+      padding: 1rem;
     }
 
-    .room-badges {
-      flex-direction: column;
-      align-items: flex-end;
-      gap: 6px;
+    .modal {
+      margin: 0.5rem;
+      max-width: calc(100% - 1rem);
     }
 
-    .invite-modal {
-      margin: 10px;
-      max-width: calc(100% - 20px);
+    .modal-body {
+      padding: 1rem;
     }
 
-    .modal-content {
-      padding: 15px;
-    }
-
-    .quick-share {
-      grid-template-columns: 1fr;
-    }
-
-    .link-container,
-    .email-container {
+    .code-row,
+    .link-row,
+    .email-row {
       flex-direction: column;
       align-items: stretch;
     }
 
     :global(.toast-notification) {
-      right: 10px;
-      left: 10px;
+      right: 1rem;
+      left: 1rem;
       transform: translateY(-100%);
     }
 
