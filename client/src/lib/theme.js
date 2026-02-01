@@ -27,21 +27,22 @@ const CHAT_STYLE_VALUES = ['solid', 'transparent', 'minimal'];
 export function getTheme() {
   const stored = typeof localStorage !== 'undefined' ? localStorage.getItem(THEME_KEY) : null;
   if (stored === 'dark' || stored === 'light') return stored;
-  if (stored === 'system' || !stored) {
+  if (stored === 'system') {
     return typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
   }
-  return typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  // Default to light theme if no preference is stored
+  return 'light';
 }
 
 /** User preference: 'light' | 'dark' | 'system' */
 export function getThemePreference() {
-  if (typeof localStorage === 'undefined') return 'system';
+  if (typeof localStorage === 'undefined') return 'light';
   const v = localStorage.getItem(THEME_KEY);
-  return v === 'dark' || v === 'light' || v === 'system' ? v : 'system';
+  return v === 'dark' || v === 'light' || v === 'system' ? v : 'light';
 }
 
 export function setThemePreference(preference) {
-  const v = preference === 'dark' || preference === 'light' || preference === 'system' ? preference : 'system';
+  const v = preference === 'dark' || preference === 'light' || preference === 'system' ? preference : 'light';
   if (typeof localStorage !== 'undefined') localStorage.setItem(THEME_KEY, v);
   const resolved = v === 'system'
     ? (typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
@@ -57,7 +58,7 @@ export function applySystemTheme() {
 }
 
 export function setTheme(theme) {
-  const v = theme === 'dark' ? 'dark' : theme === 'light' ? 'light' : 'system';
+  const v = theme === 'dark' ? 'dark' : theme === 'light' ? 'light' : theme === 'system' ? 'system' : 'light';
   if (typeof localStorage !== 'undefined') localStorage.setItem(THEME_KEY, v);
   const resolved = v === 'system'
     ? (typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')

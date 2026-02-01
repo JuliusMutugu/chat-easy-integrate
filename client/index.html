@@ -119,27 +119,8 @@
       --overlay-bg: rgba(0, 0, 0, 0.75);
     }
 
-    @media (prefers-color-scheme: dark) {
-      :root:not([data-theme="light"]) {
-        --white: #0f172a;
-        --gray-50: #1e293b;
-        --gray-100: #334155;
-        --gray-200: #475569;
-        --gray-300: #64748b;
-        --gray-500: #94a3b8;
-        --gray-700: #cbd5e1;
-        --gray-900: #f1f5f9;
-        --navy-100: #1e3a5f;
-        --bg-primary: #0f172a;
-        --bg-secondary: #1e293b;
-        --text-primary: #f1f5f9;
-        --text-secondary: #94a3b8;
-        --border: #334155;
-        --card-bg: #1e293b;
-        --input-bg: #334155;
-        --overlay-bg: rgba(0, 0, 0, 0.75);
-      }
-    }
+    /* Removed auto dark mode based on system preference */
+    /* Users can still manually switch to dark mode via the theme toggle */
 
     * {
       margin: 0;
@@ -196,8 +177,11 @@
           document.documentElement.setAttribute('data-theme', 'dark');
         } else if (stored === 'light') {
           document.documentElement.setAttribute('data-theme', 'light');
-        } else if (prefersDark) {
+        } else if (stored === 'system' && prefersDark) {
           document.documentElement.setAttribute('data-theme', 'dark');
+        } else {
+          // Default to light theme if no preference is stored
+          document.documentElement.setAttribute('data-theme', 'light');
         }
         var accent = localStorage.getItem('accent');
         if (accent === 'purple' || accent === 'blue' || accent === 'teal') {
