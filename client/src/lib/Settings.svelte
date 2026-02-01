@@ -1,19 +1,38 @@
 <script>
   import { onMount } from "svelte";
-  import { getEnterToSend, setEnterToSend } from "./theme.js";
+  import { getEnterToSend, setEnterToSend, getCustomSnippets, addCustomSnippet, removeCustomSnippet } from "./theme.js";
   import { playClick } from "./theme.js";
 
   export let onBack = () => {};
 
   let enterToSend = true;
+  let snippets = [];
+  let newSnippetName = "";
+  let newSnippetBody = "";
 
   onMount(() => {
     enterToSend = getEnterToSend();
+    snippets = getCustomSnippets();
   });
 
   function toggleEnterToSend() {
     enterToSend = !enterToSend;
     setEnterToSend(enterToSend);
+    playClick();
+  }
+
+  function addSnippet() {
+    if (!newSnippetName.trim() && !newSnippetBody.trim()) return;
+    addCustomSnippet({ name: newSnippetName.trim() || "Snippet", body: newSnippetBody.trim() });
+    snippets = getCustomSnippets();
+    newSnippetName = "";
+    newSnippetBody = "";
+    playClick();
+  }
+
+  function removeSnippet(id) {
+    removeCustomSnippet(id);
+    snippets = getCustomSnippets();
     playClick();
   }
 </script>
@@ -46,6 +65,27 @@
           </span>
         </button>
       </div>
+    </section>
+
+    <section class="settings-section" aria-labelledby="snippets-heading">
+      <h3 id="snippets-heading">Custom snippets</h3>
+      <p class="setting-desc block">Save reusable text snippets to insert into messages from the chat input.</p>
+      <div class="snippet-add">
+        <input type="text" bind:value={newSnippetName} placeholder="Label (e.g. Greeting)" class="snippet-input" />
+        <textarea bind:value={newSnippetBody} placeholder="Text to insert" class="snippet-textarea" rows="2"></textarea>
+        <button type="button" class="btn-save" onclick={addSnippet} disabled={!newSnippetBody.trim()}>Add snippet</button>
+      </div>
+      <ul class="snippet-list">
+        {#each snippets as s}
+          <li class="snippet-item">
+            <span class="snippet-name">{s.name}</span>
+            <span class="snippet-body-preview">{s.body.length > 60 ? s.body.slice(0, 60) + "…" : s.body}</span>
+            <button type="button" class="snippet-delete" onclick={() => removeSnippet(s.id)} aria-label="Delete snippet">Delete</button>
+          </li>
+        {:else}
+          <li class="snippet-empty">No custom snippets yet. Add one above.</li>
+        {/each}
+      </ul>
     </section>
   </div>
 </div>
@@ -134,6 +174,81 @@
     font-size: 0.8125rem;
     color: var(--gray-600);
     line-height: 1.4;
+  }
+
+  .setting-desc.block {
+    margin-bottom: 1rem;
+  }
+
+  .snippet-add {
+    margin-bottom: 1rem;
+  }
+
+  .snippet-input,
+  .snippet-textarea {
+    display: block;
+    width: 100%;
+    max-width: 320px;
+    padding: 0.5rem 0.75rem;
+    border: 2px solid var(--border);
+    border-radius: 8px;
+    font-size: 0.875rem;
+    font-family: inherit;
+    margin-bottom: 0.5rem;
+  }
+
+  .snippet-textarea {
+    min-height: 60px;
+    resize: vertical;
+  }
+
+  .snippet-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+  }
+
+  .snippet-item {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 0.875rem;
+  }
+
+  .snippet-name {
+    font-weight: 600;
+    color: var(--navy-800);
+    min-width: 100px;
+  }
+
+  .snippet-body-preview {
+    flex: 1;
+    color: var(--gray-600);
+    font-size: 0.8125rem;
+  }
+
+  .snippet-delete {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.75rem;
+    background: var(--gray-100);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--gray-700);
+    cursor: pointer;
+    font-family: inherit;
+  }
+
+  .snippet-delete:hover {
+    background: var(--gray-200);
+  }
+
+  .snippet-empty {
+    padding: 1rem 0;
+    color: var(--gray-500);
+    font-size: 0.875rem;
   }
 
   .toggle {

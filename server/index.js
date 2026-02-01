@@ -2,7 +2,14 @@ import express from "express";
 import { createServer } from "http";
 import { Server } from "socket.io";
 import cors from "cors";
+import multer from "multer";
+import path from "path";
+import fs from "fs";
+import { fileURLToPath } from "url";
 import { v4 as uuidv4 } from "uuid";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 import {
   initDatabase,
   createRoom,
@@ -25,6 +32,8 @@ import {
   getChannelConfig,
   setChannelConfig,
   saveOutboundMessage,
+  addDealEvent,
+  getDealEvents,
 } from "./database.js";
 import { sendEmail, validateEmailConfig } from "./channels/email.js";
 import { sendSms, sendSmsDev, validateSmsConfig } from "./channels/sms.js";
@@ -44,6 +53,22 @@ app.use(express.json());
 
 // Initialize database
 await initDatabase();
+
+// Uploads directory for documents
+const uploadsDir = path.join(__dirname, "uploads");
+if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+
+const storage = multer.diskStorage({
+  destination: (_req, _file, cb) => cb(null, uploadsDir),
+  filename: (_req, file, cb) => {
+    const ext = path.extname(file.originalname) || "";
+    cb(null, `${uuidv4()}${ext}`);
+  },
+});
+const upload = multer({ storage, limits: { fileSize: 15 * 1024 * 1024 } }); // 15 MB
+
+// Serve uploaded files (before client dist so /uploads works)
+app.use("/uploads", express.static(uploadsDir));
 
 // Serve static files from client build
 app.use(express.static("client/dist"));
@@ -187,6 +212,19 @@ app.get("/api/rooms/:roomId/messages", async (req, res) => {
   }
 });
 
+app.get("/api/rooms/:roomId/deal-events", async (req, res) => {
+  try {
+    const { roomId } = req.params;
+    const room = await getRoomById(roomId);
+    if (!room) return res.status(404).json({ error: "Room not found" });
+    const events = await getDealEvents(roomId);
+    res.json(events);
+  } catch (error) {
+    console.error("Error fetching deal events:", error);
+    res.status(500).json({ error: "Failed to fetch deal events" });
+  }
+});
+
 // Generate new invite link for existing room (only room creator, and must be in room)
 app.post("/api/rooms/:roomId/invite", async (req, res) => {
   try {
@@ -232,6 +270,21 @@ app.post("/api/rooms/:roomId/invite", async (req, res) => {
   } catch (error) {
     console.error("Error generating new invite:", error);
     res.status(500).json({ error: "Failed to generate new invite" });
+  }
+});
+
+// Document upload (room-scoped)
+app.post("/api/rooms/:roomId/upload", upload.single("file"), async (req, res) => {
+  try {
+    const { roomId } = req.params;
+    const room = await getRoomById(roomId);
+    if (!room) return res.status(404).json({ error: "Room not found" });
+    if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+    const url = "/uploads/" + req.file.filename;
+    res.json({ url, filename: req.file.originalname || req.file.filename });
+  } catch (error) {
+    console.error("Error uploading document:", error);
+    res.status(500).json({ error: "Failed to upload document" });
   }
 });
 
@@ -527,7 +580,30 @@ io.on("connection", (socket) => {
     }
   });
 
-  socket.on("send-message", async ({ message, type = "text", location, replyToMessageId }) => {
+  socket.on("update-deal-term", async ({ roomId, field, oldValue, newValue }) => {
+    try {
+      const connection = activeConnections.get(socket.id);
+      if (!connection || connection.roomId !== roomId) return;
+      const room = await getRoomById(roomId);
+      if (!room) return;
+      const eventId = await addDealEvent(roomId, connection.username, field, oldValue ?? null, newValue);
+      const event = {
+        id: eventId,
+        username: connection.username,
+        field,
+        oldValue: oldValue ?? null,
+        newValue: String(newValue),
+        createdAt: new Date(),
+      };
+      io.to(roomId).emit("deal-event", event);
+      io.to(roomId).emit("deal-term-updated", { field, newValue: String(newValue) });
+    } catch (error) {
+      console.error("Error updating deal term:", error);
+      socket.emit("error", { message: "Failed to update term" });
+    }
+  });
+
+  socket.on("send-message", async ({ message, type = "text", location, replyToMessageId, payload, clientId }) => {
     try {
       const connection = activeConnections.get(socket.id);
       if (!connection) return;
@@ -539,7 +615,11 @@ io.on("connection", (socket) => {
       let messageContent = message;
       let locationData = null;
 
-      if (type === "location" && location) {
+      if (type === "deal_terms" && payload) {
+        messageContent = JSON.stringify({ type: "deal_terms", text: message || "Deal terms", ...payload });
+      } else if (type === "document" && payload && payload.url) {
+        messageContent = JSON.stringify({ type: "document", text: message || payload.filename, url: payload.url, filename: payload.filename });
+      } else if (type === "location" && location) {
         locationData = {
           latitude: location.latitude,
           longitude: location.longitude,
@@ -562,6 +642,7 @@ io.on("connection", (socket) => {
         type,
         userId: socket.id,
         replyToMessageId: messageData.replyToMessageId ?? undefined,
+        clientId: clientId ?? undefined,
       };
 
       // If it's a location message, parse and add location data to the broadcast
@@ -569,6 +650,15 @@ io.on("connection", (socket) => {
         const parsedContent = JSON.parse(messageData.message);
         fullMessageData.message = parsedContent.text;
         fullMessageData.location = parsedContent.location;
+      }
+      if (type === "deal_terms" && payload) {
+        fullMessageData.message = message || "Deal terms";
+        fullMessageData.payload = payload;
+      }
+      if (type === "document" && payload) {
+        fullMessageData.message = message || payload.filename;
+        fullMessageData.payload = payload;
+        fullMessageData.documentUrl = payload.url;
       }
 
       io.to(roomId).emit("new-message", fullMessageData);

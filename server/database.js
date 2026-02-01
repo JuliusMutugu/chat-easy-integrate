@@ -145,6 +145,25 @@ export async function initDatabase() {
       `);
     }
 
+    const dealEventsExists = await db.get(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='deal_events'"
+    );
+    if (!dealEventsExists) {
+      await db.exec(`
+        CREATE TABLE deal_events (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          room_id TEXT NOT NULL,
+          username TEXT NOT NULL,
+          field TEXT NOT NULL,
+          old_value TEXT,
+          new_value TEXT NOT NULL,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (room_id) REFERENCES rooms (id) ON DELETE CASCADE
+        );
+        CREATE INDEX idx_deal_events_room ON deal_events (room_id);
+      `);
+    }
+
     console.log("✅ Database initialized successfully");
     return db;
   } catch (error) {
@@ -433,6 +452,7 @@ export async function getRoomMessages(roomId, limit = 50) {
     let message = msg.message;
     let type = "text";
     let location = undefined;
+    let payload = undefined;
     try {
       const parsed = JSON.parse(msg.message);
       if (!parsed) return { id: msg.id, username: msg.username, message, type, replyToMessageId: msg.reply_to_message_id ?? undefined, timestamp: new Date(msg.timestamp) };
@@ -443,17 +463,28 @@ export async function getRoomMessages(roomId, limit = 50) {
       } else if (parsed.type === "announcement") {
         type = "announcement";
         message = parsed.text || parsed.message || message;
+      } else if (parsed.type === "deal_terms") {
+        type = "deal_terms";
+        message = parsed.text || parsed.message || message;
+        payload = { price: parsed.price, qty: parsed.qty, slaDays: parsed.slaDays, sla: parsed.sla };
+      } else if (parsed.type === "document") {
+        type = "document";
+        message = parsed.text || parsed.filename || message;
+        payload = { url: parsed.url, filename: parsed.filename };
       }
     } catch (_) {}
-    return {
+    const out = {
       id: msg.id,
       username: msg.username,
       message,
       type,
       location,
+      payload,
       replyToMessageId: msg.reply_to_message_id ?? undefined,
       timestamp: new Date(msg.timestamp),
     };
+    if (type === "document" && out.payload?.url) out.documentUrl = out.payload.url;
+    return out;
   });
 }
 
@@ -483,6 +514,31 @@ export async function saveOutboundMessage(channel, recipient, body, status = "se
     [channel, recipient, body, status, externalId]
   );
   return result.lastID;
+}
+
+// Deal events (audit trail: who changed what, when)
+export async function addDealEvent(roomId, username, field, oldValue, newValue) {
+  const result = await db.run(
+    "INSERT INTO deal_events (room_id, username, field, old_value, new_value) VALUES (?, ?, ?, ?, ?)",
+    [roomId, username, field, oldValue ?? null, String(newValue)]
+  );
+  return result.lastID;
+}
+
+export async function getDealEvents(roomId, limit = 50) {
+  const rows = await db.all(
+    "SELECT id, room_id, username, field, old_value, new_value, created_at FROM deal_events WHERE room_id = ? ORDER BY created_at DESC LIMIT ?",
+    [roomId, limit]
+  );
+  return rows.reverse().map((r) => ({
+    id: r.id,
+    roomId: r.room_id,
+    username: r.username,
+    field: r.field,
+    oldValue: r.old_value,
+    newValue: r.new_value,
+    createdAt: new Date(r.created_at),
+  }));
 }
 
 // Utility function for UUID generation

@@ -1,6 +1,8 @@
 <script>
   import { onMount, onDestroy } from "svelte";
-  import { playClick, playSuccess, getEnterToSend } from "./theme.js";
+  import { playClick, playSuccess, getEnterToSend, getCustomSnippets } from "./theme.js";
+  import DealPanel from "./DealPanel.svelte";
+  import Calculator from "./Calculator.svelte";
 
   export let socket = null;
   export let config = {};
@@ -24,7 +26,12 @@
   let messageInputEl;
   let mentionListEl;
   let showQuickReplies = false;
+  let showCustomSnippets = false;
   let greetingDismissed = false;
+  let showDealPanel = false;
+  let showCalculator = false;
+  let fileInputEl;
+  let uploadInProgress = false;
 
   const QUICK_REPLIES = [
     "Yes",
@@ -68,7 +75,16 @@
     });
 
     socket.on("new-message", (message) => {
-      messages = [...messages, message];
+      const hasClientId = message.clientId != null;
+      if (hasClientId) {
+        const idx = messages.findIndex((m) => m.clientId === message.clientId);
+        if (idx !== -1) {
+          messages = messages.slice(0, idx).concat([{ ...message, status: "sent" }]).concat(messages.slice(idx + 1));
+          scrollToBottom();
+          return;
+        }
+      }
+      messages = [...messages, { ...message, status: "sent" }];
       scrollToBottom();
     });
 
@@ -186,9 +202,22 @@
   function sendMessage() {
     if (!newMessage.trim() || !socket) return;
 
+    const clientId = "c-" + Date.now() + "-" + Math.random().toString(36).slice(2, 9);
+    const pending = {
+      id: "pending-" + clientId,
+      clientId,
+      username: config.username,
+      message: newMessage.trim(),
+      type: "text",
+      status: "pending",
+      timestamp: new Date(),
+    };
+    messages = [...messages, pending];
+
     const payload = {
       message: newMessage.trim(),
       type: "text",
+      clientId,
     };
     if (replyingTo) {
       payload.replyToMessageId = replyingTo.id;
@@ -199,6 +228,31 @@
     newMessage = "";
     replyingTo = null;
     mentionShow = false;
+    showQuickReplies = false;
+    showCustomSnippets = false;
+  }
+
+  function sendDealTerms(terms) {
+    if (!socket) return;
+    const clientId = "c-" + Date.now() + "-" + Math.random().toString(36).slice(2, 9);
+    const pending = {
+      id: "pending-" + clientId,
+      clientId,
+      username: config.username,
+      message: "Deal terms",
+      type: "deal_terms",
+      payload: terms,
+      status: "pending",
+      timestamp: new Date(),
+    };
+    messages = [...messages, pending];
+    socket.emit("send-message", {
+      message: "Deal terms",
+      type: "deal_terms",
+      payload: terms,
+      clientId,
+    });
+    playClick();
   }
 
   function cancelReply() {
@@ -417,6 +471,7 @@
     if (message.type === "negotiation-start") return "negotiation-message";
     if (message.type === "negotiation-end") return "negotiation-end-message";
     if (message.type === "vote") return "vote-message";
+    if (message.type === "deal_terms") return "deal-terms-message " + (message.username === config.username ? "own-message" : "other-message");
     if (message.username === config.username) return "own-message";
     return "other-message";
   }
@@ -424,6 +479,59 @@
   function insertQuickReply(text) {
     newMessage = newMessage ? newMessage + " " + text : text;
     showQuickReplies = false;
+  }
+
+  function insertCustomSnippet(body) {
+    newMessage = newMessage ? newMessage + " " + body : body;
+    showCustomSnippets = false;
+    playClick();
+  }
+
+  function insertResultFromCalculator(value) {
+    newMessage = newMessage ? newMessage + " " + value : value;
+    showCalculator = false;
+    playClick();
+  }
+
+  async function onFileSelected(e) {
+    const file = e.target.files?.[0];
+    if (!file || !socket || !config.serverUrl) return;
+    uploadInProgress = true;
+    playClick();
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await fetch(`${config.serverUrl}/api/rooms/${room.id}/upload`, {
+        method: "POST",
+        body: formData,
+      });
+      if (!res.ok) throw new Error("Upload failed");
+      const { url, filename } = await res.json();
+      const clientId = "c-" + Date.now() + "-" + Math.random().toString(36).slice(2, 9);
+      const pending = {
+        id: "pending-" + clientId,
+        clientId,
+        username: config.username,
+        message: filename,
+        type: "document",
+        documentUrl: url,
+        status: "pending",
+        timestamp: new Date(),
+      };
+      messages = [...messages, pending];
+      socket.emit("send-message", {
+        message: filename,
+        type: "document",
+        payload: { url, filename },
+        clientId,
+      });
+      playSuccess();
+    } catch (err) {
+      alert("Failed to upload document. Please try again.");
+    } finally {
+      uploadInProgress = false;
+      e.target.value = "";
+    }
   }
 
   $: negotiationVoteCounts = currentNegotiation
@@ -473,6 +581,86 @@
       {/if}
     </div>
   </header>
+
+  <div class="tools-bar">
+    <button
+      type="button"
+      class="btn-tool"
+      onclick={() => { showCalculator = false; showDealPanel = !showDealPanel; playClick(); }}
+      title="Current terms (price, qty, SLA)"
+      aria-pressed={showDealPanel}
+    >
+      Terms
+    </button>
+    <button
+      type="button"
+      class="btn-tool"
+      onclick={() => { showDealPanel = false; showCalculator = !showCalculator; playClick(); }}
+      title="Calculator"
+      aria-pressed={showCalculator}
+    >
+      Calculator
+    </button>
+    <input
+      type="file"
+      bind:this={fileInputEl}
+      onchange={onFileSelected}
+      accept=".pdf,.doc,.docx,.xls,.xlsx,.txt,.png,.jpg,.jpeg"
+      class="file-input-hidden"
+      aria-label="Upload document"
+    />
+    <button
+      type="button"
+      class="btn-tool"
+      onclick={() => fileInputEl?.click()}
+      title="Upload document"
+      disabled={uploadInProgress}
+    >
+      {uploadInProgress ? "Uploading…" : "Upload"}
+    </button>
+  </div>
+
+  {#if showDealPanel}
+    <div
+      class="drawer-overlay"
+      role="dialog"
+      aria-label="Current terms"
+      tabindex="-1"
+      onclick={(e) => e.target === e.currentTarget && (showDealPanel = false)}
+      onkeydown={(e) => e.key === "Escape" && (showDealPanel = false)}
+    >
+      <div class="drawer-panel terms-drawer" role="region" aria-label="Current terms panel">
+        <div class="drawer-header">
+          <h3 class="drawer-title">Current terms</h3>
+          <button type="button" class="drawer-close" onclick={() => (showDealPanel = false)} aria-label="Close">×</button>
+        </div>
+        <div class="drawer-body">
+          <DealPanel roomId={room.id} username={config.username} {socket} config={config} onSendTerms={sendDealTerms} />
+        </div>
+      </div>
+    </div>
+  {/if}
+
+  {#if showCalculator}
+    <div
+      class="drawer-overlay"
+      role="dialog"
+      aria-label="Calculator"
+      tabindex="-1"
+      onclick={(e) => e.target === e.currentTarget && (showCalculator = false)}
+      onkeydown={(e) => e.key === "Escape" && (showCalculator = false)}
+    >
+      <div class="drawer-panel calculator-drawer" role="region" aria-label="Calculator panel">
+        <div class="drawer-header">
+          <h3 class="drawer-title">Calculator</h3>
+          <button type="button" class="drawer-close" onclick={() => (showCalculator = false)} aria-label="Close">×</button>
+        </div>
+        <div class="drawer-body">
+          <Calculator onInsertResult={insertResultFromCalculator} />
+        </div>
+      </div>
+    </div>
+  {/if}
 
   {#if showNegotiationForm}
     <div class="negotiation-form">
@@ -599,6 +787,43 @@
             <span class="loading-dot"></span>
             {message.message}
           </div>
+        {:else if message.type === "deal_terms"}
+          <div class="message-header">
+            <span class="msg-username">{message.username}</span>
+            <span class="msg-time">{formatTime(message.timestamp)}</span>
+          </div>
+          <div class="deal-terms-widget">
+            <p class="deal-terms-label">{message.message}</p>
+            {#if message.payload}
+              <ul class="deal-terms-list">
+                <li>Price: {message.payload.price ?? "—"}</li>
+                <li>Qty: {message.payload.qty ?? "—"}</li>
+                <li>SLA (days): {message.payload.slaDays ?? message.payload.sla ?? "—"}</li>
+              </ul>
+            {/if}
+            {#if message.status === "pending"}
+              <span class="deal-terms-pending">Sending…</span>
+            {:else if message.username === config.username}
+              <span class="deal-terms-status">Sent</span>
+            {/if}
+          </div>
+        {:else if message.type === "document"}
+          <div class="message-header">
+            <span class="msg-username">{message.username}</span>
+            <span class="msg-time">{formatTime(message.timestamp)}</span>
+          </div>
+          <div class="document-msg">
+            <span class="document-label">Document: {message.message}</span>
+            {#if message.documentUrl || message.payload?.url}
+              {@const docUrl = message.documentUrl || message.payload?.url}
+              <a href={docUrl.startsWith("http") ? docUrl : (config.serverUrl || "") + docUrl} target="_blank" rel="noopener noreferrer" class="document-link">Open / download</a>
+            {/if}
+            {#if message.status === "pending"}
+              <span class="document-pending">Uploading…</span>
+            {:else if message.username === config.username}
+              <span class="document-status">Sent</span>
+            {/if}
+          </div>
         {:else}
           <div class="system-msg">
             <span class="system-text">{message.message}</span>
@@ -640,12 +865,22 @@
           <button
             type="button"
             class="btn-quick-replies"
-            onclick={() => (showQuickReplies = !showQuickReplies)}
+            onclick={() => { showCustomSnippets = false; showQuickReplies = !showQuickReplies; }}
             title="Quick replies"
             aria-expanded={showQuickReplies}
             aria-haspopup="true"
           >
             Quick replies
+          </button>
+          <button
+            type="button"
+            class="btn-quick-replies"
+            onclick={() => { showQuickReplies = false; showCustomSnippets = !showCustomSnippets; }}
+            title="Custom snippets"
+            aria-expanded={showCustomSnippets}
+            aria-haspopup="true"
+          >
+            Snippets
           </button>
           {#if showQuickReplies}
             <div class="quick-replies-dropdown" role="menu">
@@ -653,6 +888,20 @@
                 <button type="button" class="quick-reply-option" role="menuitem" onclick={() => insertQuickReply(text)}>
                   {text}
                 </button>
+              {/each}
+            </div>
+          {/if}
+          {#if showCustomSnippets}
+            <div class="quick-replies-dropdown snippets-dropdown" role="menu">
+              {#each getCustomSnippets() as s}
+                <button type="button" class="quick-reply-option" role="menuitem" onclick={() => insertCustomSnippet(s.body)}>
+                  <span class="snippet-option-name">{s.name}</span>
+                  {#if s.body.length > 40}
+                    <span class="snippet-option-preview">{s.body.slice(0, 40)}…</span>
+                  {/if}
+                </button>
+              {:else}
+                <div class="snippets-empty">No custom snippets. Add them in Settings.</div>
               {/each}
             </div>
           {/if}
@@ -831,6 +1080,192 @@
     border-radius: 8px;
     font-size: 0.875rem;
     font-weight: 600;
+  }
+
+  .tools-bar {
+    flex-shrink: 0;
+    display: flex;
+    gap: 0.5rem;
+    padding: 0.5rem 1rem;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-secondary);
+  }
+
+  .btn-tool {
+    padding: 0.5rem 1rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--card-bg);
+    color: var(--text-primary);
+    cursor: pointer;
+    font-family: inherit;
+    transition: background-color 0.15s ease, border-color 0.15s ease;
+  }
+
+  .btn-tool:hover:not(:disabled) {
+    background: var(--gray-100);
+    border-color: var(--gray-300);
+  }
+
+  .btn-tool[aria-pressed="true"] {
+    background: var(--green-100);
+    border-color: var(--green-500);
+    color: var(--green-800);
+  }
+
+  .btn-tool:disabled {
+    opacity: 0.7;
+    cursor: not-allowed;
+  }
+
+  .file-input-hidden {
+    position: absolute;
+    width: 0;
+    height: 0;
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .drawer-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 200;
+    background: rgba(0, 0, 0, 0.4);
+    display: flex;
+    align-items: stretch;
+    justify-content: flex-end;
+  }
+
+  .drawer-panel {
+    width: 100%;
+    max-width: 420px;
+    background: var(--bg-primary);
+    border-left: 1px solid var(--border);
+    box-shadow: -8px 0 24px rgba(0, 0, 0, 0.12);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .drawer-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 1rem 1.25rem;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-secondary);
+    flex-shrink: 0;
+  }
+
+  .drawer-title {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+
+  .drawer-close {
+    width: 2rem;
+    height: 2rem;
+    padding: 0;
+    border: none;
+    background: transparent;
+    font-size: 1.5rem;
+    line-height: 1;
+    color: var(--gray-600);
+    cursor: pointer;
+    border-radius: 6px;
+    font-family: inherit;
+    transition: background-color 0.15s ease, color 0.15s ease;
+  }
+
+  .drawer-close:hover {
+    background: var(--gray-200);
+    color: var(--text-primary);
+  }
+
+  .drawer-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 1rem;
+  }
+
+  .terms-drawer .drawer-body :global(.deal-panel) {
+    margin-bottom: 0;
+  }
+
+  .document-msg {
+    background: var(--gray-50);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 0.75rem 1rem;
+    margin-top: 0.5rem;
+  }
+
+  .document-label {
+    display: block;
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--navy-800);
+    margin-bottom: 0.35rem;
+  }
+
+  .document-link {
+    font-size: 0.875rem;
+    color: var(--green-700);
+    text-decoration: none;
+  }
+
+  .document-link:hover {
+    text-decoration: underline;
+  }
+
+  .document-pending,
+  .document-status {
+    display: inline-block;
+    margin-top: 0.35rem;
+    font-size: 0.75rem;
+    color: var(--gray-500);
+  }
+
+  .deal-terms-widget {
+    background: var(--gray-50);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 0.75rem 1rem;
+    margin-top: 0.5rem;
+  }
+
+  .deal-terms-label {
+    margin: 0 0 0.5rem;
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--navy-800);
+  }
+
+  .deal-terms-list {
+    margin: 0;
+    padding-left: 1.25rem;
+    font-size: 0.875rem;
+    color: var(--gray-700);
+  }
+
+  .deal-terms-list li {
+    margin: 0.25rem 0;
+  }
+
+  .deal-terms-pending,
+  .deal-terms-status {
+    display: inline-block;
+    margin-top: 0.5rem;
+    font-size: 0.75rem;
+    color: var(--gray-500);
+  }
+
+  .deal-terms-status {
+    color: var(--green-700);
   }
 
   .negotiation-form {
@@ -1395,6 +1830,25 @@
 
   .quick-reply-option:hover {
     background: var(--bg-secondary);
+  }
+
+  .snippet-option-name {
+    display: block;
+    font-weight: 600;
+    color: var(--navy-800);
+  }
+
+  .snippet-option-preview {
+    display: block;
+    font-size: 0.75rem;
+    color: var(--gray-500);
+    margin-top: 0.25rem;
+  }
+
+  .snippets-empty {
+    padding: 0.75rem 1rem;
+    font-size: 0.8125rem;
+    color: var(--gray-500);
   }
 
   .btn-send {

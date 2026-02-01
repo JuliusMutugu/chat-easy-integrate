@@ -151,6 +151,8 @@
       <button type="button" class="nav-logo" onclick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>Messaging</button>
       <nav class="nav-links" aria-label="Main">
         <a href="#features" class="nav-link">Features</a>
+        <a href="#built" class="nav-link">What's live</a>
+        <a href="#coming" class="nav-link">Coming next</a>
         <a href="#pricing" class="nav-link">Pricing</a>
         <button type="button" class="nav-link nav-link-btn" onclick={() => { playClick(); toggleModule(); }}>
           Dashboard
@@ -215,14 +217,15 @@
     <div class="hero-inner">
       <div class="hero-content">
         <div class="hero-text">
-          <h1 class="hero-title">Connect and negotiate</h1>
+          <h1 class="hero-title">Deal-ready messaging</h1>
           <p class="hero-subtitle">
-            The messaging platform for group discussions and collaborative decision making.
+            Live terms, audit trail, and omnichannel—Email, SMS, WhatsApp from one platform. No Twilio lock-in.
           </p>
           <div class="hero-pills">
-            <span class="pill">Real-time</span>
-            <span class="pill">Negotiations</span>
-            <span class="pill">Any device</span>
+            <span class="pill">Live deal block</span>
+            <span class="pill">Audit trail</span>
+            <span class="pill">Integrations</span>
+            <span class="pill">Custom snippets</span>
           </div>
           <div class="hero-actions">
             <button class="btn-primary focus-ring" onclick={toggleModule}>
@@ -257,14 +260,17 @@
               <span class="preview-label">Live demo</span>
             </div>
             <div class="preview-body">
+              <div class="preview-deal-block">
+                <strong>Current terms</strong> · Price 100 · Qty 1 · SLA 7 days · Tax 16%
+              </div>
               <div class="preview-msg own">
-                <span>Let's discuss the project timeline.</span>
+                <span>Let's lock this. Deal terms shared.</span>
               </div>
               <div class="preview-msg other">
-                <span>I propose we extend by 2 weeks.</span>
+                <span>Agreed. I've approved the terms.</span>
               </div>
               <div class="preview-negotiation">
-                <span>Negotiation started: "Extend timeline by 2 weeks"</span>
+                <span>Negotiation: "Extend timeline by 2 weeks"</span>
                 <div class="preview-votes">
                   <button type="button" class="vote-btn approve">Approve</button>
                   <button type="button" class="vote-btn reject">Reject</button>
@@ -285,47 +291,79 @@
 
   <section id="features" class="features" data-reveal>
     <div class="container">
-      <h2 class="section-title reveal-title">Why choose this platform</h2>
+      <h2 class="section-title reveal-title">Built for deals, not just chat</h2>
       <div class="feature-grid">
         <article class="feature-card" data-reveal data-reveal-delay="0">
+          <div class="feature-icon-wrap">
+            <span class="feature-icon" aria-hidden="true">Terms</span>
+          </div>
+          <h3>Live deal block</h3>
+          <p>
+            Pinned Current Terms: price, qty, SLA. Tax, shipping, margin recalc instantly (Svelte 5 runes). Share as a message widget.
+          </p>
+          <div class="feature-demo">
+            <div class="demo-code">Price · Qty · SLA · Version history</div>
+          </div>
+        </article>
+        <article class="feature-card" data-reveal data-reveal-delay="1">
+          <div class="feature-icon-wrap">
+            <span class="feature-icon" aria-hidden="true">Audit</span>
+          </div>
+          <h3>Audit trail</h3>
+          <p>
+            Who changed what, when—e.g. "User A changed price from $100 to $90 · 14:00 EAT." Compliance-ready.
+          </p>
+          <div class="feature-demo">
+            <div class="demo-proposal">Timeline of term changes</div>
+          </div>
+        </article>
+        <article class="feature-card" data-reveal data-reveal-delay="2">
+          <div class="feature-icon-wrap">
+            <span class="feature-icon" aria-hidden="true">Channels</span>
+          </div>
+          <h3>Integrations (our engine)</h3>
+          <p>
+            Email (SMTP), SMS (your gateway), WhatsApp (your API). No Twilio dependency. Configure once, send from the app.
+          </p>
+          <div class="feature-demo">
+            <div class="demo-links">
+              <span class="demo-link">Email</span>
+              <span class="demo-link">SMS</span>
+              <span class="demo-link">WhatsApp</span>
+            </div>
+          </div>
+        </article>
+        <article class="feature-card" data-reveal data-reveal-delay="3">
           <div class="feature-icon-wrap">
             <span class="feature-icon" aria-hidden="true">Invite</span>
           </div>
           <h3>Smart invitations</h3>
           <p>
-            Share room codes, email invites, or links. Join with just a code.
+            Creator-only invite; request-to-join with Accept/Decline. Pending requests in the nav. Room codes and links.
           </p>
           <div class="feature-demo">
-            <div class="demo-code">ABC123</div>
-            <div class="demo-links">
-              <span class="demo-link">Email</span>
-              <span class="demo-link">Link</span>
-            </div>
+            <div class="demo-code">Request → Creator notified → Accept/Decline</div>
           </div>
         </article>
-        <article class="feature-card" data-reveal data-reveal-delay="1">
+        <article class="feature-card" data-reveal data-reveal-delay="4">
           <div class="feature-icon-wrap">
-            <span class="feature-icon" aria-hidden="true">Vote</span>
+            <span class="feature-icon" aria-hidden="true">Snippets</span>
           </div>
-          <h3>Group negotiations</h3>
+          <h3>Custom snippets</h3>
           <p>
-            Make decisions together with built-in voting and real-time results.
+            Save reusable text in Settings. Insert from the chat input with one click—templates, greetings, clauses.
           </p>
           <div class="feature-demo">
-            <div class="demo-proposal">"Extend deadline by 1 week"</div>
-            <div class="demo-votes">
-              <span class="vote-result approve">3 Approve</span>
-              <span class="vote-result reject">1 Reject</span>
-            </div>
+            <div class="demo-code">Your phrases, one tap</div>
           </div>
         </article>
-        <article class="feature-card" data-reveal data-reveal-delay="2">
+        <article class="feature-card" data-reveal data-reveal-delay="5">
           <div class="feature-icon-wrap">
             <span class="feature-icon" aria-hidden="true">Live</span>
           </div>
-          <h3>Real-time everything</h3>
+          <h3>Optimistic UI</h3>
           <p>
-            Typing indicators, live presence, and instant message delivery.
+            Messages appear sent instantly. Syncs in background—built for patchy 4G/5G and low latency.
           </p>
           <div class="feature-demo">
             <div class="demo-users">
@@ -336,6 +374,39 @@
           </div>
         </article>
       </div>
+    </div>
+  </section>
+
+  <section id="built" class="built-section" data-reveal>
+    <div class="container">
+      <h2 class="section-title reveal-title">What’s live now</h2>
+      <p class="built-lead">Everything below is implemented and available in the Dashboard.</p>
+      <ul class="built-list">
+        <li>Rooms, Create room, Join by code or invite link</li>
+        <li>Request to join (invite link) → Creator gets Accept/Decline</li>
+        <li>Pending requests (nav) + Version history (Deal block)</li>
+        <li>Deal block: Current Terms (price, qty, SLA), tax/shipping/margin, Share as message</li>
+        <li>Audit trail: deal_events API + timeline in room</li>
+        <li>Settings: Enter to send, Custom snippets</li>
+        <li>Integrations: Email (SMTP), SMS (your gateway), WhatsApp (your API)</li>
+        <li>Optimistic messaging, @mentions, Reply, Creator remove member</li>
+      </ul>
+    </div>
+  </section>
+
+  <section id="coming" class="coming-section" data-reveal>
+    <div class="container">
+      <h2 class="section-title reveal-title">Coming next</h2>
+      <p class="built-lead">Planned and on the roadmap.</p>
+      <ul class="built-list coming-list">
+        <li>Redlining lite (inline suggestions for contract text)</li>
+        <li>Identity: IPRS (Kenya), Onfido / Stripe Identity</li>
+        <li>M-Pesa (Daraja), Pesapal, Stripe, PayPal</li>
+        <li>Smart invoicing (KRA / VAT on Accept)</li>
+        <li>E-signatures in-app</li>
+        <li>KDPP & GDPR (Right to be Forgotten, Data Residency)</li>
+        <li>RBAC & approval workflows (Manager approves discount)</li>
+      </ul>
     </div>
   </section>
 
@@ -1253,28 +1324,6 @@
     margin-bottom: 0.5rem;
     font-size: 0.8125rem;
     color: var(--green-800);
-  }
-
-  .demo-votes {
-    display: flex;
-    gap: 0.75rem;
-  }
-
-  .vote-result {
-    padding: 0.25rem 0.5rem;
-    border-radius: 6px;
-    font-size: 0.75rem;
-    font-weight: 600;
-  }
-
-  .vote-result.approve {
-    background: var(--green-100);
-    color: var(--green-800);
-  }
-
-  .vote-result.reject {
-    background: var(--gray-200);
-    color: var(--gray-700);
   }
 
   .demo-users {

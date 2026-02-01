@@ -1,6 +1,7 @@
 const THEME_KEY = 'theme';
 const SOUND_KEY = 'soundEnabled';
 const ENTER_TO_SEND_KEY = 'enterToSend';
+const CUSTOM_SNIPPETS_KEY = 'customSnippets';
 
 export function getTheme() {
   return document.documentElement.getAttribute('data-theme') || (typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
@@ -35,6 +36,34 @@ export function getEnterToSend() {
 
 export function setEnterToSend(enabled) {
   if (typeof localStorage !== 'undefined') localStorage.setItem(ENTER_TO_SEND_KEY, enabled ? 'true' : 'false');
+}
+
+export function getCustomSnippets() {
+  if (typeof localStorage === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(CUSTOM_SNIPPETS_KEY);
+    if (!raw) return [];
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? arr : [];
+  } catch (_) {
+    return [];
+  }
+}
+
+export function setCustomSnippets(snippets) {
+  if (typeof localStorage !== 'undefined') localStorage.setItem(CUSTOM_SNIPPETS_KEY, JSON.stringify(snippets || []));
+}
+
+export function addCustomSnippet({ name, body }) {
+  const list = getCustomSnippets();
+  const id = 's-' + Date.now() + '-' + Math.random().toString(36).slice(2, 9);
+  list.push({ id, name: (name || '').trim() || 'Snippet', body: (body || '').trim() || '' });
+  setCustomSnippets(list);
+  return id;
+}
+
+export function removeCustomSnippet(id) {
+  setCustomSnippets(getCustomSnippets().filter((s) => s.id !== id));
 }
 
 let audioCtx = null;
