@@ -2,6 +2,8 @@
 
 **Vision:** A hyper-reactive, structured messaging platform for negotiations—Kenya to World—with closing infrastructure and trust built in.
 
+**Reference:** [respond.io](https://respond.io) is the agreed picture of what we’re building toward: omnichannel inbox, team/conversation management, contact management, workflows. See [VISION_RESPONDIO.md](./VISION_RESPONDIO.md) for how respond.io aligns with Nego and where our deal-ready edge fits in.
+
 ---
 
 ## 1. Svelte 5 Reactive Core

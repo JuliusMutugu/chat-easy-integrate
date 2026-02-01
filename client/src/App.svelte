@@ -14,6 +14,98 @@
   let quickJoinCode = "";
   let darkMode = false;
   let sectionObserver = null;
+  let heroVideoEl = null;
+  let heroVideoMuted = true;
+  let autoScrollRafId = null;
+  let autoScrollCancelled = false;
+
+  function easeInOutCubic(t) {
+    return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+  }
+  function easeOutExpo(t) {
+    return t >= 1 ? 1 : 1 - Math.pow(2, -10 * t);
+  }
+
+  function startAutoScrollTour() {
+    if (typeof window === "undefined" || showModule) return;
+    try {
+      if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    } catch (_) {}
+    const startDelay = 2500;
+    const scrollDownDuration = 2800;
+    const pauseAtBottom = 400;
+    const scrollUpDuration = 2800;
+    const scrollTargetFraction = 1;
+
+    let cancelled = false;
+    const cancel = () => {
+      cancelled = true;
+      if (autoScrollRafId) cancelAnimationFrame(autoScrollRafId);
+    };
+    const onUserScroll = () => {
+      cancel();
+      window.removeEventListener("wheel", onUserScroll, { passive: true });
+      window.removeEventListener("touchstart", onUserScroll, { passive: true });
+      window.removeEventListener("keydown", onUserKeydown);
+    };
+    const onUserKeydown = (e) => {
+      if (["Space", "ArrowDown", "ArrowUp", "PageDown", "PageUp"].includes(e.key)) cancel();
+    };
+
+    const run = () => {
+      if (cancelled || showModule) return;
+      const startY = window.scrollY;
+      const maxScroll = (document.documentElement.scrollHeight - window.innerHeight) * scrollTargetFraction;
+      const targetY = Math.max(0, maxScroll);
+      const startTime = performance.now();
+
+      const animateDown = (now) => {
+        if (cancelled || showModule) return;
+        const elapsed = now - startTime;
+        const t = Math.min(1, elapsed / scrollDownDuration);
+        const eased = easeOutExpo(t);
+        window.scrollTo(0, startY + (targetY - startY) * eased);
+        if (t < 1) autoScrollRafId = requestAnimationFrame(animateDown);
+        else {
+          autoScrollRafId = null;
+          setTimeout(() => {
+            if (cancelled || showModule) return;
+            const backStartY = window.scrollY;
+            const backStartTime = performance.now();
+            const animateUp = (now2) => {
+              if (cancelled || showModule) return;
+              const elapsed2 = now2 - backStartTime;
+              const t2 = Math.min(1, elapsed2 / scrollUpDuration);
+              const eased2 = easeOutExpo(t2);
+              window.scrollTo(0, backStartY * (1 - eased2));
+              if (t2 < 1) autoScrollRafId = requestAnimationFrame(animateUp);
+              else {
+                autoScrollRafId = null;
+                window.removeEventListener("wheel", onUserScroll, { passive: true });
+                window.removeEventListener("touchstart", onUserScroll, { passive: true });
+                window.removeEventListener("keydown", onUserKeydown);
+              }
+            };
+            requestAnimationFrame(animateUp);
+          }, pauseAtBottom);
+        }
+      };
+
+      window.addEventListener("wheel", onUserScroll, { passive: true });
+      window.addEventListener("touchstart", onUserScroll, { passive: true });
+      window.addEventListener("keydown", onUserKeydown);
+      requestAnimationFrame(animateDown);
+    };
+
+    setTimeout(run, startDelay);
+  }
+
+  function toggleHeroVideoMute() {
+    if (!heroVideoEl) return;
+    heroVideoMuted = !heroVideoMuted;
+    heroVideoEl.muted = heroVideoMuted;
+    playClick();
+  }
 
   onMount(() => {
     darkMode = document.documentElement.getAttribute("data-theme") === "dark";
@@ -47,8 +139,11 @@
     );
     document.querySelectorAll("[data-reveal]").forEach((el) => sectionObserver.observe(el));
 
+    startAutoScrollTour();
+
     return () => {
       sectionObserver?.disconnect();
+      if (autoScrollRafId) cancelAnimationFrame(autoScrollRafId);
     };
   });
 
@@ -156,14 +251,6 @@
       <div class="nav-actions">
         <button
           type="button"
-          class="nav-btn nav-btn-ghost nav-dashboard-mobile"
-          onclick={() => { playClick(); toggleModule(); }}
-          aria-label="Home – your rooms"
-        >
-          Home
-        </button>
-        <button
-          type="button"
           class="nav-btn nav-btn-icon"
           onclick={handleThemeClick}
           title={darkMode ? "Switch to light" : "Switch to dark"}
@@ -240,10 +327,33 @@
               </button>
             </div>
           </div>
+          <div class="hero-scroll-hint" aria-hidden="true">
+            <span class="hero-scroll-hint-text">Scroll to explore</span>
+            <span class="hero-scroll-hint-icon" aria-hidden="true">
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+            </span>
+          </div>
         </div>
         <div class="hero-visual">
-          <div class="hero-image-wrap" data-animate>
-            <img src="/images/nego.png" alt="Nego — deal-ready" class="hero-visual-img" />
+          <div class="hero-video-wrap" data-animate>
+            <video
+              class="hero-video"
+              src="/video/hero.mp4"
+              poster="/images/nego.png"
+              autoplay
+              muted
+              loop
+              playsinline
+              aria-label="Nego — deal-ready"
+              bind:this={heroVideoEl}
+            ></video>
+            <button type="button" class="hero-video-unmute" onclick={toggleHeroVideoMute} aria-label={heroVideoMuted ? "Unmute video" : "Mute video"} title={heroVideoMuted ? "Unmute" : "Mute"}>
+              {#if heroVideoMuted}
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>
+              {:else}
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
+              {/if}
+            </button>
           </div>
         </div>
       </div>
@@ -408,6 +518,7 @@
       <p class="pricing-lead" style="max-width: 56ch; margin-left: auto; margin-right: auto;">
         Nego is a deal-ready messaging platform. Live terms, audit trail, and omnichannel—Email, SMS, WhatsApp from one place. No lock-in.
       </p>
+      <p class="pricing-lead" style="max-width: 56ch; margin: 0.5rem auto 0;">We focus on clarity: who said what, when, and what changed. Built for negotiations and deals, not just chat.</p>
     </div>
   </section>
 
@@ -446,7 +557,6 @@
       </div>
     </div>
   </section>
-
 </main>
 {/if}
 
@@ -499,23 +609,35 @@
     color: var(--green-600);
   }
 
-  .landing .nav .nav-btn-ghost {
-    border-color: var(--border);
-    color: var(--text-secondary);
-  }
-
-  .landing .nav .nav-btn-ghost:hover {
-    background: var(--bg-secondary);
-    border-color: var(--gray-300);
-    color: var(--text-primary);
-  }
-
   .landing .nav .nav-icon {
     color: var(--text-primary);
   }
 
+  /* Dark theme: ensure logo and theme toggle are visible and high contrast */
+  :global([data-theme="dark"]) .landing .nav {
+    background: var(--bg-primary);
+    border-bottom-color: var(--border);
+  }
   :global([data-theme="dark"]) .landing .nav .nav-logo-img {
     filter: brightness(0) invert(1);
+    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.3);
+  }
+  :global([data-theme="dark"]) .landing .nav .nav-logo-text,
+  :global([data-theme="dark"]) .landing .nav .nav-link,
+  :global([data-theme="dark"]) .landing .nav .nav-link-btn {
+    color: var(--text-primary);
+  }
+  :global([data-theme="dark"]) .landing .nav .nav-btn-icon {
+    color: var(--text-primary);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+  }
+  :global([data-theme="dark"]) .landing .nav .nav-btn-icon .nav-icon {
+    color: inherit;
+  }
+  :global([data-theme="dark"]) .landing .nav .nav-btn-primary {
+    background: var(--green-600);
+    color: var(--bg-primary);
   }
 
   .nav {
@@ -645,19 +767,6 @@
       color var(--duration-fast), transform var(--duration-fast) var(--ease-spring);
   }
 
-  .nav-btn-ghost {
-    background: transparent;
-    border: 1px solid var(--border);
-    color: var(--text-secondary);
-  }
-
-  .nav-btn-ghost:hover {
-    background: var(--bg-secondary);
-    border-color: var(--gray-300);
-    color: var(--text-primary);
-    transform: translateY(-1px);
-  }
-
   .nav-btn-primary {
     background: var(--green-600);
     border: none;
@@ -672,11 +781,6 @@
   .nav-btn:focus-visible {
     outline: 2px solid var(--green-500);
     outline-offset: 2px;
-  }
-
-  :global([data-theme="dark"]) .nav-btn-ghost:hover {
-    background: var(--gray-100);
-    border-color: var(--gray-200);
   }
 
   /* Pricing */
@@ -844,7 +948,7 @@
     display: flex;
     align-items: center;
     padding: 5rem 1.5rem 4rem;
-    overflow: hidden;
+    overflow-x: hidden;
   }
 
   .hero-bg {
@@ -890,7 +994,7 @@
     line-height: 1.1;
     margin-bottom: 1.25rem;
     opacity: 0;
-    animation: fadeUp 0.8s var(--ease-out-expo) 0.1s forwards;
+    animation: fadeUp 0.65s cubic-bezier(0.16, 1, 0.3, 1) 0.1s forwards;
   }
 
   .hero-brand {
@@ -911,7 +1015,7 @@
     color: rgba(255, 255, 255, 0.9);
     margin-bottom: 1.5rem;
     opacity: 0;
-    animation: fadeUp 0.8s var(--ease-out-expo) 0.2s forwards;
+    animation: fadeUp 0.65s cubic-bezier(0.16, 1, 0.3, 1) 0.2s forwards;
   }
 
   .hero-pills {
@@ -920,7 +1024,7 @@
     margin-bottom: 1.75rem;
     flex-wrap: wrap;
     opacity: 0;
-    animation: fadeUp 0.8s var(--ease-out-expo) 0.3s forwards;
+    animation: fadeUp 0.65s cubic-bezier(0.16, 1, 0.3, 1) 0.3s forwards;
   }
 
   .pill {
@@ -938,7 +1042,44 @@
     flex-direction: column;
     gap: 1rem;
     opacity: 0;
-    animation: fadeUp 0.8s var(--ease-out-expo) 0.4s forwards;
+    animation: fadeUp 0.65s cubic-bezier(0.16, 1, 0.3, 1) 0.4s forwards;
+  }
+
+  .hero-scroll-hint {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 1.5rem;
+    padding: 0.5rem 1rem;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 999px;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.9);
+    opacity: 0;
+    animation: fadeUp 0.6s cubic-bezier(0.16, 1, 0.3, 1) 1s forwards, scrollHintBounce 1.8s cubic-bezier(0.34, 1.2, 0.64, 1) 2s ease-in-out infinite;
+    will-change: transform;
+  }
+
+  .hero-scroll-hint-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    animation: scrollHintArrow 1.8s cubic-bezier(0.34, 1.2, 0.64, 1) 2s ease-in-out infinite;
+    will-change: transform;
+  }
+
+  @keyframes scrollHintBounce {
+    0%, 100% { transform: translateY(0) scale(1); opacity: 1; }
+    45% { transform: translateY(5px) scale(1.02); opacity: 0.95; }
+    55% { transform: translateY(5px) scale(1.02); opacity: 0.95; }
+  }
+
+  @keyframes scrollHintArrow {
+    0%, 100% { transform: translateY(0); opacity: 1; }
+    45% { transform: translateY(3px); opacity: 0.85; }
+    55% { transform: translateY(3px); opacity: 0.85; }
   }
 
   .btn-primary {
@@ -1021,43 +1162,71 @@
     display: flex;
     justify-content: center;
     align-items: center;
-  }
-
-  .hero-image-wrap {
     width: 100%;
-    max-width: 420px;
-    opacity: 0;
-    animation: cardIn 1s var(--ease-out-expo) 0.5s forwards;
+    min-height: 360px;
+    overflow: visible;
   }
 
-  .hero-visual-img {
+  .hero-video-wrap {
+    position: relative;
+    width: 100%;
+    max-width: 720px;
+    opacity: 0;
+    animation: cardIn 0.75s cubic-bezier(0.16, 1, 0.3, 1) 0.5s forwards;
+    overflow: visible;
+  }
+
+  .hero-video {
     width: 100%;
     height: auto;
     display: block;
     border-radius: 12px;
     box-shadow: 0 24px 48px rgba(0, 0, 0, 0.25);
     border: 1px solid rgba(255, 255, 255, 0.1);
+    object-fit: contain;
+    background: rgba(0, 0, 0, 0.2);
+  }
+
+  .hero-video-unmute {
+    position: absolute;
+    bottom: 12px;
+    right: 12px;
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    border: none;
+    background: rgba(0, 0, 0, 0.6);
+    color: var(--white);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.2s ease;
+  }
+
+  .hero-video-unmute:hover {
+    background: rgba(0, 0, 0, 0.8);
   }
 
   @keyframes fadeUp {
     from {
       opacity: 0;
-      transform: translateY(20px);
+      transform: translateY(16px) scale(0.98);
     }
     to {
       opacity: 1;
-      transform: translateY(0);
+      transform: translateY(0) scale(1);
     }
   }
 
   @keyframes cardIn {
     from {
       opacity: 0;
-      transform: translateY(24px) rotate(-1.5deg);
+      transform: translateY(20px) scale(0.97) rotate(-1deg);
     }
     to {
       opacity: 1;
-      transform: translateY(0) rotate(-1.5deg);
+      transform: translateY(0) scale(1) rotate(-1deg);
     }
   }
 
@@ -1310,18 +1479,11 @@
     opacity: 0.8;
   }
 
-  .nav-dashboard-mobile {
-    display: none;
-  }
-
   @media (max-width: 900px) {
     .nav-links {
       display: none;
     }
 
-    .nav-dashboard-mobile {
-      display: inline-flex;
-    }
   }
 
   @media (max-width: 768px) {
@@ -1364,8 +1526,8 @@
       max-width: 100%;
     }
 
-    .hero-image-wrap {
-      max-width: 280px;
+    .hero-video-wrap {
+      max-width: 100%;
       margin: 0 auto;
     }
   }

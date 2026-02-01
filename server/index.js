@@ -23,6 +23,7 @@ import {
   removeUserFromRoom,
   removeUserFromRoomByUsername,
   getRoomUsers,
+  getRoomUserByUsername,
   getUserBySocketId,
   getCreatorSocketIdInRoom,
   addPendingJoinRequest,
@@ -167,6 +168,29 @@ app.get("/api/rooms/invite/:inviteToken", async (req, res) => {
   } catch (error) {
     console.error("Error fetching room by invite token:", error);
     res.status(500).json({ error: "Failed to fetch room" });
+  }
+});
+
+app.get("/api/rooms/invite/:inviteToken/status", async (req, res) => {
+  try {
+    const { inviteToken } = req.params;
+    const username = req.query.username;
+    if (!username || typeof username !== "string" || !username.trim()) {
+      return res.status(400).json({ error: "username query is required" });
+    }
+    const room = await getRoomByInviteToken(inviteToken);
+    if (!room) {
+      return res.status(404).json({ error: "Invalid or expired invitation link" });
+    }
+    const member = await getRoomUserByUsername(room.id, username.trim());
+    const accepted = !!member;
+    if (accepted) {
+      return res.json({ accepted: true, room });
+    }
+    return res.json({ accepted: false });
+  } catch (error) {
+    console.error("Error fetching invite status:", error);
+    res.status(500).json({ error: "Failed to fetch status" });
   }
 });
 

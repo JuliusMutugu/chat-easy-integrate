@@ -32,12 +32,16 @@
       --gray-500: #64748b;
       --gray-700: #334155;
       --gray-900: #0f172a;
+      --red-600: #dc2626;
       /* Semantic - light */
       --bg-primary: var(--white);
       --bg-secondary: var(--gray-50);
       --bg-navy: var(--navy-800);
       --accent: var(--green-600);
       --accent-hover: var(--green-700);
+      --msg-out-bg: var(--green-600);
+      --msg-out-border: none;
+      --msg-out-color: var(--white);
       --text-primary: var(--gray-900);
       --text-secondary: var(--gray-500);
       --border: var(--gray-200);
@@ -54,8 +58,37 @@
       --duration-slower: 600ms;
     }
 
+    [data-accent="purple"] {
+      --accent: #7c3aed;
+      --accent-hover: #6d28d9;
+      --msg-out-bg: #7c3aed;
+    }
+    [data-accent="blue"] {
+      --accent: #2563eb;
+      --accent-hover: #1d4ed8;
+      --msg-out-bg: #2563eb;
+    }
+    [data-accent="teal"] {
+      --accent: #0d9488;
+      --accent-hover: #0f766e;
+      --msg-out-bg: #0d9488;
+    }
+
+    [data-chat-style="transparent"] {
+      --msg-out-bg: rgba(64, 145, 108, 0.78);
+    }
+    [data-chat-style="transparent"][data-accent="purple"] { --msg-out-bg: rgba(124, 58, 237, 0.78); }
+    [data-chat-style="transparent"][data-accent="blue"] { --msg-out-bg: rgba(37, 99, 235, 0.78); }
+    [data-chat-style="transparent"][data-accent="teal"] { --msg-out-bg: rgba(13, 148, 136, 0.78); }
+
+    [data-chat-style="minimal"] {
+      --msg-out-bg: transparent;
+      --msg-out-border: 2px solid var(--accent);
+      --msg-out-color: var(--accent);
+    }
+
     [data-theme="dark"] {
-      --white: #0f172a;
+      --white: #f1f5f9;
       --gray-50: #1e293b;
       --gray-100: #334155;
       --gray-200: #475569;
@@ -64,13 +97,17 @@
       --gray-700: #cbd5e1;
       --gray-900: #f1f5f9;
       --navy-100: #1e3a5f;
-      --navy-800: #1a365d;
-      --navy-900: #0d2137;
+      --navy-600: #60a5fa;
+      --navy-700: #93c5fd;
+      --navy-800: #1e3a5f;
+      --navy-900: #0f172a;
       --green-100: #1a3d2e;
       --green-400: #2d6a4f;
-      --green-500: #40916c;
-      --green-600: #52b788;
-      --green-700: #74c69d;
+      --green-500: #52b788;
+      --green-600: #74c69d;
+      --green-700: #95d5b2;
+      --green-800: #40916c;
+      --red-600: #f87171;
       --bg-primary: #0f172a;
       --bg-secondary: #1e293b;
       --text-primary: #f1f5f9;
@@ -129,7 +166,7 @@
 
     body {
       font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      background: var(--bg-secondary);
+      background: var(--bg-primary);
       color: var(--text-primary);
       min-height: 100vh;
       -webkit-font-smoothing: antialiased;
@@ -160,6 +197,18 @@
           document.documentElement.setAttribute('data-theme', 'light');
         } else if (prefersDark) {
           document.documentElement.setAttribute('data-theme', 'dark');
+        }
+        var accent = localStorage.getItem('accent');
+        if (accent === 'purple' || accent === 'blue' || accent === 'teal') {
+          document.documentElement.setAttribute('data-accent', accent);
+        } else {
+          document.documentElement.setAttribute('data-accent', 'green');
+        }
+        var chatStyle = localStorage.getItem('chatStyle');
+        if (chatStyle === 'transparent' || chatStyle === 'minimal') {
+          document.documentElement.setAttribute('data-chat-style', chatStyle);
+        } else {
+          document.documentElement.setAttribute('data-chat-style', 'solid');
         }
       } catch (e) {}
     })();

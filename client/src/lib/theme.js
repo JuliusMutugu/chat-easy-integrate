@@ -1,7 +1,13 @@
 const THEME_KEY = 'theme';
+const ACCENT_KEY = 'accent';
+const CHAT_STYLE_KEY = 'chatStyle';
 const SOUND_KEY = 'soundEnabled';
 const ENTER_TO_SEND_KEY = 'enterToSend';
 const CUSTOM_SNIPPETS_KEY = 'customSnippets';
+const AVATAR_KEY = 'avatar';
+
+const ACCENT_VALUES = ['green', 'purple', 'blue', 'teal'];
+const CHAT_STYLE_VALUES = ['solid', 'transparent', 'minimal'];
 
 /** Resolved theme for CSS: 'light' or 'dark' */
 export function getTheme() {
@@ -52,6 +58,39 @@ export function toggleTheme() {
   return next;
 }
 
+/** Accent color: 'green' | 'purple' | 'blue' | 'teal' */
+export function getAccent() {
+  if (typeof localStorage === 'undefined') return 'green';
+  const v = localStorage.getItem(ACCENT_KEY);
+  return ACCENT_VALUES.includes(v) ? v : 'green';
+}
+
+export function setAccent(accent) {
+  const v = ACCENT_VALUES.includes(accent) ? accent : 'green';
+  if (typeof localStorage !== 'undefined') localStorage.setItem(ACCENT_KEY, v);
+  if (typeof document !== 'undefined') document.documentElement.setAttribute('data-accent', v);
+  return v;
+}
+
+/** Chat/conversation style: 'solid' | 'transparent' | 'minimal' */
+export function getChatStyle() {
+  if (typeof localStorage === 'undefined') return 'solid';
+  const v = localStorage.getItem(CHAT_STYLE_KEY);
+  return CHAT_STYLE_VALUES.includes(v) ? v : 'solid';
+}
+
+export function setChatStyle(style) {
+  const v = CHAT_STYLE_VALUES.includes(style) ? style : 'solid';
+  if (typeof localStorage !== 'undefined') localStorage.setItem(CHAT_STYLE_KEY, v);
+  if (typeof document !== 'undefined') document.documentElement.setAttribute('data-chat-style', v);
+  return v;
+}
+
+export function applyAppearanceCustomization() {
+  setAccent(getAccent());
+  setChatStyle(getChatStyle());
+}
+
 export function isSoundEnabled() {
   if (typeof localStorage === 'undefined') return false;
   return localStorage.getItem(SOUND_KEY) === 'true';
@@ -59,6 +98,17 @@ export function isSoundEnabled() {
 
 export function setSoundEnabled(enabled) {
   if (typeof localStorage !== 'undefined') localStorage.setItem(SOUND_KEY, enabled ? 'true' : 'false');
+}
+
+export function getAvatar() {
+  if (typeof localStorage === 'undefined') return '';
+  const v = localStorage.getItem(AVATAR_KEY);
+  return v === 'male' || v === 'female' ? v : '';
+}
+
+export function setAvatar(value) {
+  if (typeof localStorage === 'undefined') return;
+  localStorage.setItem(AVATAR_KEY, value === 'male' || value === 'female' ? value : '');
 }
 
 export function getEnterToSend() {

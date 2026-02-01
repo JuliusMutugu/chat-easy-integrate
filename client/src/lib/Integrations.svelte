@@ -102,18 +102,70 @@
     error = "";
     if (channel) await loadChannelConfig(channel);
   }
+
+  const CHANNEL_CATALOG = [
+    { id: "email", name: "Email (SMTP)", category: "email", description: "Use your own SMTP server. Gmail, SendGrid, or self-hosted. No lock-in.", popular: true },
+    { id: "sms", name: "SMS", category: "sms", description: "Your gateway. We POST to your URL. Set Gateway URL to send; leave empty for dev.", popular: false },
+    { id: "whatsapp", name: "WhatsApp Business", category: "business", description: "Your adapter. Plug Meta WhatsApp Business API or compatible provider.", popular: true },
+    { id: "identity", name: "Identity (KYC)", category: "more", description: "Local: IPRS (Kenya). Global: Onfido, Stripe Identity. Used in-app for verification.", popular: false },
+    { id: "payments", name: "Payments", category: "more", description: "M-Pesa, Pesapal, Stripe, PayPal. Used in-app for payment requests and invoices.", popular: false },
+  ];
+
+  let catalogCategory = "all";
+  let catalogSearch = "";
+
+  $: catalogFiltered = CHANNEL_CATALOG.filter((ch) => {
+    const matchCat = catalogCategory === "all" || ch.category === catalogCategory;
+    const q = catalogSearch.trim().toLowerCase();
+    const matchSearch = !q || (ch.name && ch.name.toLowerCase().includes(q)) || (ch.description && ch.description.toLowerCase().includes(q));
+    return matchCat && matchSearch;
+  });
 </script>
 
 <div class="integrations-view">
   <header class="integrations-header">
     <button type="button" class="btn-back" onclick={() => { playClick(); onBack(); }}>Back</button>
-    <h2 class="integrations-title">Integrations</h2>
+    <h2 class="integrations-title">Channels</h2>
   </header>
 
   <div class="integrations-content">
-    <p class="integrations-intro">
-      Nego engine: Email (SMTP) sends when configured. SMS and WhatsApp work when you set your gateway/API URL; otherwise test messages are logged only. Identity and Payments config is saved and used in-app for verification and payment requests.
-    </p>
+    <section class="channel-catalog" aria-labelledby="catalog-heading">
+      <h2 id="catalog-heading" class="catalog-title">Channel Catalog</h2>
+      <p class="catalog-desc">Manage your messaging channels and discover new ones to help you acquire more customers.</p>
+      <div class="catalog-toolbar">
+        <div class="catalog-tabs">
+          <button type="button" class="catalog-tab" class:active={catalogCategory === "all"} onclick={() => { playClick(); catalogCategory = "all"; }}>All</button>
+          <button type="button" class="catalog-tab" class:active={catalogCategory === "business"} onclick={() => { playClick(); catalogCategory = "business"; }}>Business Messaging</button>
+          <button type="button" class="catalog-tab" class:active={catalogCategory === "sms"} onclick={() => { playClick(); catalogCategory = "sms"; }}>SMS</button>
+          <button type="button" class="catalog-tab" class:active={catalogCategory === "email"} onclick={() => { playClick(); catalogCategory = "email"; }}>Email</button>
+          <button type="button" class="catalog-tab" class:active={catalogCategory === "more"} onclick={() => { playClick(); catalogCategory = "more"; }}>More</button>
+        </div>
+        <div class="catalog-search-row">
+          <input type="search" class="catalog-search" placeholder="Search Channel Catalog" bind:value={catalogSearch} aria-label="Search Channel Catalog" />
+        </div>
+      </div>
+      <div class="catalog-grid">
+        {#each catalogFiltered as ch}
+          <article class="catalog-card">
+            <div class="catalog-card-icon" data-channel={ch.id}>
+              {#if ch.id === "email"}
+                <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+              {:else if ch.id === "sms"}
+                <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+              {:else if ch.id === "whatsapp"}
+                <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
+              {:else}
+                <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+              {/if}
+            </div>
+            {#if ch.popular}<span class="catalog-badge">Popular</span>{/if}
+            <h3 class="catalog-card-name">{ch.name}</h3>
+            <p class="catalog-card-desc">{ch.description}</p>
+            <button type="button" class="catalog-connect" onclick={() => setActive(ch.id)}>Connect</button>
+          </article>
+        {/each}
+      </div>
+    </section>
 
     {#if message}
       <div class="banner success" role="status">{message}</div>
@@ -122,6 +174,9 @@
       <div class="banner err" role="alert">{error}</div>
     {/if}
 
+    {#if activeChannel}
+      <h3 class="config-heading">Configure: {CHANNEL_CATALOG.find(c => c.id === activeChannel)?.name ?? activeChannel}</h3>
+    {/if}
     <div class="channel-tabs">
       <button type="button" class="tab" class:active={activeChannel === "email"} onclick={() => setActive("email")}>Email (SMTP)</button>
       <button type="button" class="tab" class:active={activeChannel === "sms"} onclick={() => setActive("sms")}>SMS</button>
@@ -272,11 +327,177 @@
     overflow-y: auto;
   }
 
-  .integrations-intro {
-    margin: 0 0 1.5rem;
+  /* Channel Catalog (respond.io style) */
+  .channel-catalog {
+    margin-bottom: 2rem;
+  }
+
+  .catalog-title {
+    margin: 0 0 0.25rem;
+    font-size: 1.5rem;
+    font-weight: 600;
+    color: var(--navy-900);
+  }
+
+  .catalog-desc {
+    margin: 0 0 1.25rem;
     font-size: 0.9375rem;
     color: var(--gray-600);
     line-height: 1.5;
+  }
+
+  .catalog-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 1.25rem;
+  }
+
+  .catalog-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .catalog-tab {
+    padding: 0.5rem 1rem;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--card-bg);
+    color: var(--gray-700);
+    font-size: 0.875rem;
+    font-weight: 500;
+    font-family: inherit;
+    cursor: pointer;
+    transition: background-color 0.15s ease, border-color 0.15s ease;
+  }
+
+  .catalog-tab:hover {
+    background: var(--gray-50);
+    border-color: var(--gray-300);
+  }
+
+  .catalog-tab.active {
+    background: var(--navy-800);
+    color: var(--white);
+    border-color: var(--navy-800);
+  }
+
+  .catalog-search-row {
+    flex-shrink: 0;
+  }
+
+  .catalog-search {
+    width: 100%;
+    max-width: 320px;
+    padding: 0.5rem 0.75rem 0.5rem 2.25rem;
+    border: 2px solid var(--border);
+    border-radius: 8px;
+    font-size: 0.875rem;
+    font-family: inherit;
+    background: var(--card-bg) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2'%3E%3Ccircle cx='11' cy='11' r='8'/%3E%3Cpath d='m21 21-4.35-4.35'/%3E%3C/svg%3E") no-repeat 0.65rem center;
+  }
+
+  .catalog-search:focus {
+    outline: none;
+    border-color: var(--green-600);
+  }
+
+  .catalog-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 1rem;
+  }
+
+  .catalog-card {
+    position: relative;
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1.25rem;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+
+  .catalog-card:hover {
+    border-color: var(--gray-300);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+  }
+
+  .catalog-card-icon {
+    width: 48px;
+    height: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 10px;
+    margin-bottom: 0.75rem;
+    color: var(--navy-700);
+    background: var(--gray-100);
+  }
+
+  .catalog-card-icon[data-channel="email"] { color: var(--navy-700); }
+  .catalog-card-icon[data-channel="sms"] { color: var(--green-700); }
+  .catalog-card-icon[data-channel="whatsapp"] { color: #25D366; }
+  .catalog-card-icon[data-channel="identity"],
+  .catalog-card-icon[data-channel="payments"] { color: var(--navy-600); }
+
+  .catalog-badge {
+    position: absolute;
+    top: 1rem;
+    right: 1rem;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--green-700);
+    background: var(--green-100);
+    padding: 0.2rem 0.5rem;
+    border-radius: 4px;
+  }
+
+  .catalog-card-name {
+    margin: 0 0 0.35rem;
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--navy-900);
+  }
+
+  .catalog-card-desc {
+    margin: 0 0 1rem;
+    font-size: 0.8125rem;
+    color: var(--gray-600);
+    line-height: 1.45;
+    flex: 1;
+  }
+
+  .catalog-connect {
+    padding: 0.5rem 1rem;
+    border-radius: 8px;
+    border: 1px solid var(--green-600);
+    background: var(--green-600);
+    color: var(--white);
+    font-size: 0.875rem;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+    transition: background-color 0.15s ease, border-color 0.15s ease;
+  }
+
+  .catalog-connect:hover {
+    background: var(--green-700);
+    border-color: var(--green-700);
+  }
+
+  .config-heading {
+    margin: 1rem 0 0.75rem;
+    font-size: 1.125rem;
+    font-weight: 600;
+    color: var(--navy-900);
   }
 
   .banner {

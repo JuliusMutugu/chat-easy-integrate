@@ -1,6 +1,6 @@
 <script>
   import { onMount, onDestroy } from "svelte";
-  import { playClick, playSuccess, getEnterToSend, getCustomSnippets } from "./theme.js";
+  import { playClick, playSuccess, getEnterToSend, getCustomSnippets, getAvatar } from "./theme.js";
   import DealPanel from "./DealPanel.svelte";
   import Calculator from "./Calculator.svelte";
 
@@ -466,6 +466,17 @@ How to join:
     return messages.find((m) => m.id === id);
   }
 
+  function getAvatarLetter(username) {
+    if (!username || typeof username !== "string") return "?";
+    const letter = username.trim().charAt(0).toUpperCase();
+    return letter || "?";
+  }
+
+  function getAvatarType(username) {
+    if (username !== config.username) return null;
+    return getAvatar() || null;
+  }
+
   function handleMessageInput() {
     const lastAt = newMessage.lastIndexOf("@");
     if (lastAt === -1) {
@@ -748,8 +759,8 @@ How to join:
     : { approve: 0, reject: 0 };
 </script>
 
-<div class="chat-room">
-  <header class="chat-header">
+<div class="chat-room chat-room-respondio">
+  <header class="chat-header respondio-chat-header">
     <div class="header-left">
       <button type="button" class="btn-back" onclick={onLeaveRoom}>Leave</button>
       <div class="room-meta">
@@ -780,27 +791,27 @@ How to join:
         {/if}
       </div>
     </div>
-
+    <div class="header-date">{new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</div>
+    <div class="header-actions respondio-header-actions">
+      <button type="button" class="header-action-btn" onclick={() => (showMembersList = !showMembersList)} title="Contact" aria-label="Contact">
+        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+      </button>
+      <button type="button" class="header-action-btn" title="History" aria-label="History">
+        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+      </button>
+      <button type="button" class="header-action-btn" title="Channels" aria-label="Channels">
+        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+      </button>
+      <button type="button" class="header-action-btn" onclick={() => (showDealPanel = !showDealPanel)} title="CRM / Deal" aria-label="CRM">
+        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
+      </button>
+    </div>
     <div class="header-right">
       {#if room.createdByUsername === config.username}
-        <button
-          type="button"
-          class="btn-invite-header"
-          onclick={openInvitePanel}
-          title="Invite someone to this room"
-          aria-label="Invite to room"
-        >
-          Invite
-        </button>
+        <button type="button" class="btn-invite-header" onclick={openInvitePanel} title="Invite" aria-label="Invite to room">Invite</button>
       {/if}
       {#if !isNegotiationActive}
-        <button
-          type="button"
-          class="btn-negotiate"
-          onclick={() => (showNegotiationForm = !showNegotiationForm)}
-        >
-          Start negotiation
-        </button>
+        <button type="button" class="btn-negotiate" onclick={() => (showNegotiationForm = !showNegotiationForm)}>Start negotiation</button>
       {:else}
         <span class="negotiation-badge">Negotiation active</span>
       {/if}
@@ -1132,6 +1143,21 @@ How to join:
     {/if}
     {#each messages as message}
       <div class="message {getMessageClass(message)}">
+        {#if message.username}
+          {@const avatarType = getAvatarType(message.username)}
+          {#if avatarType === "male"}
+            <span class="message-avatar message-avatar-icon" title={message.username} aria-hidden="true">
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="7" r="4"/><path d="M5 21v-2a4 4 0 0 1 4-4h6a4 4 0 0 1 4 4v2"/></svg>
+            </span>
+          {:else if avatarType === "female"}
+            <span class="message-avatar message-avatar-icon" title={message.username} aria-hidden="true">
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="3"/><path d="M12 14c-4 0-6 2-6 4v2h12v-2c0-2-2-4-6-4z"/></svg>
+            </span>
+          {:else}
+            <span class="message-avatar" title={message.username}>{getAvatarLetter(message.username)}</span>
+          {/if}
+        {/if}
+        <div class="message-content">
         {#if message.type === "text"}
           <div class="message-header">
             <span class="msg-username">{message.username}</span>
@@ -1142,9 +1168,9 @@ How to join:
           {#if message.replyToMessageId}
             {@const replyToMsg = getMessageById(message.replyToMessageId)}
             {#if replyToMsg}
-              <div class="message-reply-to">
+              <div class="message-reply-to" role="region" aria-label="Reply to {replyToMsg.username}">
                 <span class="reply-to-label">Replying to {replyToMsg.username}:</span>
-                <span class="reply-to-snippet">{replyToMsg.message && (replyToMsg.message.length > 80 ? replyToMsg.message.slice(0, 80) + "..." : replyToMsg.message)}</span>
+                <blockquote class="reply-to-quote">{replyToMsg.message && (replyToMsg.message.length > 80 ? replyToMsg.message.slice(0, 80) + "..." : replyToMsg.message)}</blockquote>
               </div>
             {/if}
           {/if}
@@ -1279,6 +1305,7 @@ How to join:
             <span class="msg-time">{formatTime(message.timestamp)}</span>
           </div>
         {/if}
+        </div>
       </div>
     {/each}
 
@@ -1300,7 +1327,7 @@ How to join:
     {/if}
   </div>
 
-  <div class="input-area">
+  <div class="input-area respondio-input-area">
     {#if replyingTo}
       <div class="replying-to-bar">
         <span class="replying-to-label">Replying to {replyingTo.username}:</span>
@@ -1308,6 +1335,12 @@ How to join:
         <button type="button" class="replying-to-cancel" onclick={cancelReply} aria-label="Cancel reply">Cancel</button>
       </div>
     {/if}
+    <div class="input-channel-row">
+      <select class="input-channel-select" aria-label="Channel">
+        <option value="nego">Nego</option>
+        <option value="whatsapp">WhatsApp</option>
+      </select>
+    </div>
     <div class="input-row input-row-wrap">
       <div class="input-with-mentions">
         <div class="quick-replies-wrap">
@@ -1362,7 +1395,7 @@ How to join:
         <textarea
           bind:this={messageInputEl}
           bind:value={newMessage}
-          placeholder="Type your message... Use @ to mention someone"
+          placeholder="Use '/' for snippets, '$' for variables, ':' for emoji. Type your message..."
           rows="1"
           oninput={handleMessageInput}
           onkeydown={handleInputKeydown}
@@ -1379,24 +1412,16 @@ How to join:
         {/if}
       </div>
       <div class="input-actions-row">
-        <button
-          type="button"
-          class="btn-location btn-location-icon"
-          onclick={shareLocation}
-          title="Share live location"
-          aria-label="Share location"
-        >
+        <button type="button" class="btn-add-comment" title="Add comment" aria-label="Add comment">Add comment</button>
+        <button type="button" class="btn-location btn-location-icon" onclick={shareLocation} title="Share location" aria-label="Share location">
           <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
         </button>
-        <button
-          type="button"
-          class="btn-send"
-          onclick={sendMessage}
-          disabled={!newMessage.trim()}
-        >
-          Send
-        </button>
+        <button type="button" class="btn-send" onclick={sendMessage} disabled={!newMessage.trim()}>Send</button>
       </div>
+    </div>
+    <div class="input-respondio-footer">
+      <button type="button" class="btn-ai-assist" title="AI Assist" aria-label="AI Assist">AI Assist</button>
+      <button type="button" class="btn-summarize" title="Summarize" aria-label="Summarize">Summarize</button>
     </div>
   </div>
 </div>
@@ -1420,6 +1445,42 @@ How to join:
     flex-shrink: 0;
     transition: background-color var(--duration-normal) var(--ease-in-out);
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  }
+
+  .respondio-chat-header {
+    flex-wrap: wrap;
+  }
+
+  .header-date {
+    font-size: 0.8125rem;
+    color: var(--text-secondary);
+    margin-left: auto;
+    margin-right: 0.5rem;
+  }
+
+  .header-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+  }
+
+  .header-action-btn {
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    background: none;
+    color: var(--text-secondary);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background-color 0.15s ease, color 0.15s ease;
+  }
+
+  .header-action-btn:hover {
+    background: var(--gray-100);
+    color: var(--text-primary);
   }
 
   .header-left {
@@ -2217,17 +2278,61 @@ How to join:
   }
 
   .message {
-    max-width: 75%;
+    display: flex;
+    flex-direction: row;
+    gap: 0.5rem;
+    align-items: flex-start;
+    max-width: 85%;
     word-wrap: break-word;
     animation: msgAppear 0.3s var(--ease-out-expo);
   }
 
   .own-message {
+    flex-direction: row-reverse;
     align-self: flex-end;
   }
 
   .other-message {
     align-self: flex-start;
+  }
+
+  .message-avatar {
+    width: 36px;
+    height: 36px;
+    min-width: 36px;
+    min-height: 36px;
+    border-radius: 50%;
+    background: var(--navy-600);
+    color: var(--white);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 0.875rem;
+    flex-shrink: 0;
+  }
+
+  .own-message .message-avatar {
+    background: var(--accent);
+  }
+
+  .message-avatar.message-avatar-icon {
+    background: var(--navy-500);
+    color: var(--white);
+  }
+
+  .own-message .message-avatar.message-avatar-icon {
+    background: var(--accent);
+    color: var(--white);
+  }
+
+  .message-avatar.message-avatar-icon svg {
+    display: block;
+  }
+
+  .message-content {
+    flex: 1;
+    min-width: 0;
   }
 
   .system-message,
@@ -2237,6 +2342,14 @@ How to join:
     align-self: center;
     max-width: 90%;
     text-align: center;
+  }
+
+  .system-message .message-content,
+  .negotiation-message .message-content,
+  .negotiation-end-message .message-content,
+  .vote-message .message-content {
+    display: flex;
+    justify-content: center;
   }
 
   .message-header {
@@ -2273,8 +2386,9 @@ How to join:
   }
 
   .own-message .message-body {
-    background: var(--navy-700);
-    color: var(--white);
+    background: var(--msg-out-bg);
+    border: var(--msg-out-border, none);
+    color: var(--msg-out-color, var(--white));
   }
 
   .system-msg {
@@ -2363,6 +2477,72 @@ How to join:
     background: var(--bg-primary);
     flex-shrink: 0;
     transition: background-color var(--duration-normal) var(--ease-in-out);
+  }
+
+  .input-channel-row {
+    margin-bottom: 0.5rem;
+  }
+
+  .input-channel-select {
+    padding: 0.35rem 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    font-family: inherit;
+    background: var(--card-bg);
+    color: var(--text-primary);
+    cursor: pointer;
+  }
+
+  .input-channel-select:focus {
+    outline: none;
+    border-color: var(--green-600);
+  }
+
+  .btn-add-comment {
+    padding: 0.25rem 0.5rem;
+    border: none;
+    background: none;
+    color: var(--text-secondary);
+    font-size: 0.8125rem;
+    font-weight: 500;
+    font-family: inherit;
+    cursor: pointer;
+    transition: color 0.15s ease;
+  }
+
+  .btn-add-comment:hover {
+    color: var(--text-primary);
+  }
+
+  .input-respondio-footer {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-top: 0.5rem;
+    padding-top: 0.5rem;
+    border-top: 1px solid var(--border);
+  }
+
+  .btn-ai-assist,
+  .btn-summarize {
+    padding: 0.4rem 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--card-bg);
+    color: var(--text-primary);
+    font-size: 0.8125rem;
+    font-weight: 500;
+    font-family: inherit;
+    cursor: pointer;
+    transition: background-color 0.15s ease, border-color 0.15s ease;
+  }
+
+  .btn-ai-assist:hover,
+  .btn-summarize:hover {
+    background: var(--gray-50);
+    border-color: var(--gray-300);
   }
 
   .replying-to-bar {
@@ -2518,30 +2698,38 @@ How to join:
   }
 
   .msg-reply-btn:hover {
-    color: var(--green-600);
+    color: var(--accent);
   }
 
   .message-reply-to {
-    padding: 0.375rem 0.5rem;
-    margin-bottom: 0.25rem;
+    padding: 0.5rem 0.75rem;
+    margin-bottom: 0.35rem;
     background: var(--bg-secondary);
-    border-left: 3px solid var(--green-500);
-    border-radius: 0 6px 6px 0;
+    border-left: 4px solid var(--green-500);
+    border-radius: 0 8px 8px 0;
     font-size: 0.8125rem;
   }
 
   .reply-to-label {
-    font-weight: 600;
-    color: var(--text-secondary);
-    margin-right: 0.25rem;
+    display: block;
+    font-weight: 700;
+    color: var(--green-700);
+    margin-bottom: 0.25rem;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
   }
 
-  .reply-to-snippet {
+  .reply-to-quote {
+    margin: 0;
+    padding-left: 0.5rem;
     color: var(--text-secondary);
+    font-style: italic;
+    border: none;
   }
 
   .message-body .mention {
-    color: var(--green-700);
+    color: var(--accent-hover, var(--green-700));
     font-weight: 600;
     background: var(--green-100);
     padding: 0.125rem 0.25rem;

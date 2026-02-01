@@ -1,6 +1,6 @@
 <script>
   import { onMount } from "svelte";
-  import { getEnterToSend, setEnterToSend, getCustomSnippets, addCustomSnippet, removeCustomSnippet, getThemePreference, setThemePreference } from "./theme.js";
+  import { getEnterToSend, setEnterToSend, getCustomSnippets, addCustomSnippet, removeCustomSnippet, getThemePreference, setThemePreference, getAvatar, setAvatar, getAccent, setAccent, getChatStyle, setChatStyle } from "./theme.js";
   import { playClick, playSuccess } from "./theme.js";
 
   export let onBack = () => {};
@@ -15,16 +15,40 @@
   let privacyMessage = "";
   let privacyError = "";
   let appearancePreference = "system";
+  let avatarChoice = "";
+  let accentChoice = "green";
+  let chatStyleChoice = "solid";
 
   onMount(() => {
     enterToSend = getEnterToSend();
     snippets = getCustomSnippets();
     appearancePreference = getThemePreference();
+    avatarChoice = getAvatar();
+    accentChoice = getAccent();
+    chatStyleChoice = getChatStyle();
   });
+
+  function chooseAvatar(value) {
+    avatarChoice = value;
+    setAvatar(value);
+    playClick();
+  }
 
   function setAppearance(value) {
     appearancePreference = value;
     setThemePreference(value);
+    playClick();
+  }
+
+  function setAccentChoice(value) {
+    accentChoice = value;
+    setAccent(value);
+    playClick();
+  }
+
+  function setChatStyleChoice(value) {
+    chatStyleChoice = value;
+    setChatStyle(value);
     playClick();
   }
 
@@ -112,6 +136,90 @@
           <input type="radio" name="appearance" value="system" bind:group={appearancePreference} onchange={() => setAppearance("system")} />
           <span class="appearance-label">System</span>
         </label>
+      </div>
+    </section>
+
+    <section class="settings-section" aria-labelledby="accent-heading">
+      <h3 id="accent-heading">Accent color</h3>
+      <p class="setting-desc block">Choose a color for buttons, links, and your chat bubbles. Like choosing a theme color in messaging apps.</p>
+      <div class="accent-options">
+        <button type="button" class="accent-option" class:selected={accentChoice === "green"} onclick={() => setAccentChoice("green")} aria-pressed={accentChoice === "green"} title="Green">
+          <span class="accent-swatch accent-green" aria-hidden="true"></span>
+          <span class="accent-label">Green</span>
+        </button>
+        <button type="button" class="accent-option" class:selected={accentChoice === "purple"} onclick={() => setAccentChoice("purple")} aria-pressed={accentChoice === "purple"} title="Purple">
+          <span class="accent-swatch accent-purple" aria-hidden="true"></span>
+          <span class="accent-label">Purple</span>
+        </button>
+        <button type="button" class="accent-option" class:selected={accentChoice === "blue"} onclick={() => setAccentChoice("blue")} aria-pressed={accentChoice === "blue"} title="Blue">
+          <span class="accent-swatch accent-blue" aria-hidden="true"></span>
+          <span class="accent-label">Blue</span>
+        </button>
+        <button type="button" class="accent-option" class:selected={accentChoice === "teal"} onclick={() => setAccentChoice("teal")} aria-pressed={accentChoice === "teal"} title="Teal">
+          <span class="accent-swatch accent-teal" aria-hidden="true"></span>
+          <span class="accent-label">Teal</span>
+        </button>
+      </div>
+    </section>
+
+    <section class="settings-section" aria-labelledby="chat-style-heading">
+      <h3 id="chat-style-heading">Chat style</h3>
+      <p class="setting-desc block">How your sent messages look—solid, transparent, or minimal. Gives the conversation a different feel.</p>
+      <div class="chat-style-options">
+        <label class="chat-style-option">
+          <input type="radio" name="chatStyle" value="solid" bind:group={chatStyleChoice} onchange={() => setChatStyleChoice("solid")} />
+          <span class="chat-style-text">
+            <span class="chat-style-label">Solid</span>
+            <span class="chat-style-desc">Filled bubbles (default)</span>
+          </span>
+        </label>
+        <label class="chat-style-option">
+          <input type="radio" name="chatStyle" value="transparent" bind:group={chatStyleChoice} onchange={() => setChatStyleChoice("transparent")} />
+          <span class="chat-style-text">
+            <span class="chat-style-label">Transparent</span>
+            <span class="chat-style-desc">Semi-transparent bubbles</span>
+          </span>
+        </label>
+        <label class="chat-style-option">
+          <input type="radio" name="chatStyle" value="minimal" bind:group={chatStyleChoice} onchange={() => setChatStyleChoice("minimal")} />
+          <span class="chat-style-text">
+            <span class="chat-style-label">Minimal</span>
+            <span class="chat-style-desc">Outline only, no fill</span>
+          </span>
+        </label>
+      </div>
+    </section>
+
+    <section class="settings-section" aria-labelledby="avatar-heading">
+      <h3 id="avatar-heading">Profile avatar</h3>
+      <p class="setting-desc block">Choose an avatar for your profile. Useful in organizations.</p>
+      <div class="avatar-options">
+        <button
+          type="button"
+          class="avatar-option"
+          class:selected={avatarChoice === "male"}
+          onclick={() => chooseAvatar("male")}
+          aria-pressed={avatarChoice === "male"}
+          title="Male avatar"
+        >
+          <span class="avatar-icon avatar-male" aria-hidden="true">
+            <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="7" r="4"/><path d="M5 21v-2a4 4 0 0 1 4-4h6a4 4 0 0 1 4 4v2"/></svg>
+          </span>
+          <span class="avatar-label">Male</span>
+        </button>
+        <button
+          type="button"
+          class="avatar-option"
+          class:selected={avatarChoice === "female"}
+          onclick={() => chooseAvatar("female")}
+          aria-pressed={avatarChoice === "female"}
+          title="Female avatar"
+        >
+          <span class="avatar-icon avatar-female" aria-hidden="true">
+            <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="3"/><path d="M12 14c-4 0-6 2-6 4v2h12v-2c0-2-2-4-6-4z"/></svg>
+          </span>
+          <span class="avatar-label">Female</span>
+        </button>
       </div>
     </section>
 
@@ -243,10 +351,162 @@
   .appearance-option input {
     width: 1rem;
     height: 1rem;
-    accent-color: var(--green-600);
+    accent-color: var(--accent);
   }
 
   .appearance-label {
+    user-select: none;
+  }
+
+  .accent-options {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    margin-top: 0.5rem;
+  }
+
+  .accent-option {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.75rem 1rem;
+    border: 2px solid var(--border);
+    border-radius: 12px;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    cursor: pointer;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    font-family: inherit;
+    transition: border-color 0.15s ease, background-color 0.15s ease;
+  }
+
+  .accent-option:hover {
+    border-color: var(--gray-300);
+    background: var(--bg-secondary);
+  }
+
+  .accent-option.selected {
+    border-color: var(--accent);
+    background: var(--gray-50);
+  }
+
+  .accent-swatch {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+  }
+
+  .accent-green { background: #40916c; }
+  .accent-purple { background: #7c3aed; }
+  .accent-blue { background: #2563eb; }
+  .accent-teal { background: #0d9488; }
+
+  .accent-label {
+    user-select: none;
+  }
+
+  .chat-style-options {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+  }
+
+  .chat-style-option {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.75rem 1rem;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--bg-primary);
+    cursor: pointer;
+    transition: border-color 0.15s ease, background-color 0.15s ease;
+  }
+
+  .chat-style-option:hover {
+    border-color: var(--gray-300);
+    background: var(--bg-secondary);
+  }
+
+  .chat-style-option:has(input:checked) {
+    border-color: var(--accent);
+    background: var(--gray-50);
+  }
+
+  .chat-style-option input {
+    flex-shrink: 0;
+    accent-color: var(--accent);
+  }
+
+  .chat-style-text {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+  }
+
+  .chat-style-label {
+    font-size: 0.9375rem;
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+
+  .chat-style-desc {
+    font-size: 0.8125rem;
+    color: var(--text-secondary);
+  }
+
+  .avatar-options {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    margin-top: 0.5rem;
+  }
+
+  .avatar-option {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 1rem 1.25rem;
+    border: 2px solid var(--border);
+    border-radius: 12px;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    cursor: pointer;
+    font-size: 0.875rem;
+    font-weight: 500;
+    font-family: inherit;
+    transition: border-color 0.15s ease, background-color 0.15s ease;
+  }
+
+  .avatar-option:hover {
+    border-color: var(--gray-300);
+    background: var(--bg-secondary);
+  }
+
+  .avatar-option.selected {
+    border-color: var(--accent);
+    background: var(--gray-50);
+  }
+
+  .avatar-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    color: var(--text-secondary);
+  }
+
+  .avatar-option.selected .avatar-icon {
+    color: var(--green-700);
+  }
+
+  .avatar-label {
     user-select: none;
   }
 
