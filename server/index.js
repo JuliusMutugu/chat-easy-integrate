@@ -76,6 +76,12 @@ const upload = multer({ storage, limits: { fileSize: 15 * 1024 * 1024 } }); // 1
 // Serve uploaded files (before client dist so /uploads works)
 app.use("/uploads", express.static(uploadsDir));
 
+// Expose logo and public images (for invite email, etc.) – try client/dist first (build), then client/public (dev)
+const clientDistImages = path.join(__dirname, "client/dist/images");
+const clientPublicImages = path.join(__dirname, "client/public/images");
+const imagesDir = fs.existsSync(clientDistImages) ? clientDistImages : clientPublicImages;
+app.use("/images", express.static(imagesDir));
+
 // Serve static files from client build
 app.use(express.static("client/dist"));
 
