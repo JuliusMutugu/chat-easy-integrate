@@ -1,9 +1,16 @@
 <script>
+  import { tick } from "svelte";
   /**
    * Simple calculator for quick math during negotiations.
    * Optional onInsertResult callback to insert the display value into chat.
    */
   let { onInsertResult = () => {} } = $props();
+  let calcEl;
+  $effect(() => {
+    if (calcEl) {
+      tick().then(() => calcEl?.focus());
+    }
+  });
 
   let display = $state("0");
   let previous = $state(null);
@@ -21,33 +28,47 @@
     }
   }
 
+  function normalizeOp(op) {
+    if (op === "−" || op === "-") return "-";
+    if (op === "×" || op === "*") return "*";
+    if (op === "÷" || op === "/") return "/";
+    return op === "+" ? "+" : null;
+  }
+
   function inputOp(op) {
-    const num = parseFloat(display);
-    if (previous != null && operation) {
+    const normalized = normalizeOp(op);
+    if (normalized == null) return;
+    const rawNum = parseFloat(display);
+    const num = Number.isNaN(rawNum) ? 0 : rawNum;
+    if (previous != null && operation !== null) {
       const result = compute(previous, num, operation);
-      display = String(Number.isInteger(result) ? result : Math.round(result * 1e6) / 1e6);
-      previous = null;
-      operation = null;
+      const rounded = Number.isInteger(result) ? result : Math.round(result * 1e6) / 1e6;
+      display = String(rounded);
+      previous = rounded;
+      operation = normalized;
     } else {
       previous = num;
+      operation = normalized;
     }
-    operation = op;
     fresh = true;
   }
 
   function compute(a, b, op) {
+    const aa = Number.isNaN(a) ? 0 : a;
+    const bb = Number.isNaN(b) ? 0 : b;
     switch (op) {
-      case "+": return a + b;
-      case "−": return a - b;
-      case "×": return a * b;
-      case "÷": return b === 0 ? 0 : a / b;
-      default: return b;
+      case "+": return aa + bb;
+      case "-": return aa - bb;
+      case "*": return aa * bb;
+      case "/": return bb === 0 ? 0 : aa / bb;
+      default: return bb;
     }
   }
 
   function equals() {
-    const num = parseFloat(display);
-    if (previous != null && operation) {
+    const rawNum = parseFloat(display);
+    const num = Number.isNaN(rawNum) ? 0 : rawNum;
+    if (previous != null && operation !== null) {
       const result = compute(previous, num, operation);
       display = String(Number.isInteger(result) ? result : Math.round(result * 1e6) / 1e6);
       previous = null;
@@ -67,15 +88,66 @@
     const value = display.replace(/^0+(\d)/, "$1") || "0";
     onInsertResult(value);
   }
+
+  function handleKeydown(e) {
+    const key = e.key;
+    if (key >= "0" && key <= "9") {
+      e.preventDefault();
+      inputDigit(parseInt(key, 10));
+      return;
+    }
+    if (key === "Numpad0" || key === "Numpad1" || key === "Numpad2" || key === "Numpad3" || key === "Numpad4" ||
+        key === "Numpad5" || key === "Numpad6" || key === "Numpad7" || key === "Numpad8" || key === "Numpad9") {
+      e.preventDefault();
+      inputDigit(parseInt(key.replace("Numpad", ""), 10));
+      return;
+    }
+    if (key === "." || key === "NumpadDecimal") {
+      e.preventDefault();
+      inputDigit(".");
+      return;
+    }
+    if (key === "+" || key === "NumpadAdd") {
+      e.preventDefault();
+      inputOp("+");
+      return;
+    }
+    if (key === "-" || key === "NumpadSubtract") {
+      e.preventDefault();
+      inputOp("-");
+      return;
+    }
+    if (key === "*" || key === "NumpadMultiply") {
+      e.preventDefault();
+      inputOp("*");
+      return;
+    }
+    if (key === "/" || key === "NumpadDivide") {
+      e.preventDefault();
+      inputOp("/");
+      return;
+    }
+    if (key === "Enter" || key === "=" || key === "NumpadEnter") {
+      e.preventDefault();
+      equals();
+      return;
+    }
+    if (key === "Escape" || key === "c" || key === "C") {
+      e.preventDefault();
+      clearDisplay();
+    }
+  }
 </script>
 
-<div class="calculator">
+<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+<div class="calculator" bind:this={calcEl} tabindex="-1" role="application" aria-label="Calculator" onkeydown={handleKeydown}>
   <div class="calc-display" aria-live="polite">{display}</div>
   <div class="calc-buttons">
     <button type="button" class="calc-btn calc-op" onclick={clearDisplay}>C</button>
-    <button type="button" class="calc-btn calc-op" onclick={() => inputOp("÷")}>÷</button>
-    <button type="button" class="calc-btn calc-op" onclick={() => inputOp("×")}>×</button>
-    <button type="button" class="calc-btn calc-op" onclick={() => inputOp("−")}>−</button>
+    <button type="button" class="calc-btn calc-op" onclick={() => inputOp("/")}>÷</button>
+    <button type="button" class="calc-btn calc-op" onclick={() => inputOp("*")}>×</button>
+    <button type="button" class="calc-btn calc-op" onclick={() => inputOp("-")}>−</button>
     <button type="button" class="calc-btn" onclick={() => inputDigit(7)}>7</button>
     <button type="button" class="calc-btn" onclick={() => inputDigit(8)}>8</button>
     <button type="button" class="calc-btn" onclick={() => inputDigit(9)}>9</button>

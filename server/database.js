@@ -164,6 +164,23 @@ export async function initDatabase() {
       `);
     }
 
+    const roomMemberRolesExists = await db.get(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='room_member_roles'"
+    );
+    if (!roomMemberRolesExists) {
+      await db.exec(`
+        CREATE TABLE room_member_roles (
+          room_id TEXT NOT NULL,
+          username TEXT NOT NULL,
+          role TEXT DEFAULT 'member',
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          PRIMARY KEY (room_id, username),
+          FOREIGN KEY (room_id) REFERENCES rooms (id) ON DELETE CASCADE
+        );
+        CREATE INDEX idx_room_member_roles_room ON room_member_roles (room_id);
+      `);
+    }
+
     console.log("✅ Database initialized successfully");
     return db;
   } catch (error) {
@@ -290,11 +307,9 @@ export async function getRoomByInviteToken(inviteToken) {
   return getRoomById(room.id);
 }
 
-export async function getAllRooms() {
-  const rooms = await db.all("SELECT * FROM rooms ORDER BY created_at DESC");
-
-  const roomsWithCounts = await Promise.all(
-    rooms.map(async (room) => {
+async function roomsWithCounts(roomRows) {
+  return Promise.all(
+    roomRows.map(async (room) => {
       const userCount = await db.get(
         "SELECT COUNT(*) as count FROM room_users WHERE room_id = ?",
         [room.id]
@@ -316,8 +331,24 @@ export async function getAllRooms() {
       };
     })
   );
+}
 
-  return roomsWithCounts;
+export async function getAllRooms() {
+  const rooms = await db.all("SELECT * FROM rooms ORDER BY created_at DESC");
+  return roomsWithCounts(rooms);
+}
+
+/** Rooms the user is invited to: created by them or they have joined (in room_users). */
+export async function getRoomsForUser(username) {
+  if (!username || typeof username !== "string" || !username.trim()) return getAllRooms();
+  const rooms = await db.all(
+    `SELECT DISTINCT r.* FROM rooms r
+     LEFT JOIN room_users ru ON r.id = ru.room_id AND ru.username = ?
+     WHERE r.created_by_username = ? OR ru.username = ?
+     ORDER BY r.created_at DESC`,
+    [username.trim(), username.trim(), username.trim()]
+  );
+  return roomsWithCounts(rooms);
 }
 
 export async function updateRoomInviteToken(roomId, serverUrl) {
@@ -466,11 +497,28 @@ export async function getRoomMessages(roomId, limit = 50) {
       } else if (parsed.type === "deal_terms") {
         type = "deal_terms";
         message = parsed.text || parsed.message || message;
-        payload = { price: parsed.price, qty: parsed.qty, slaDays: parsed.slaDays, sla: parsed.sla };
+        payload = {
+          price: parsed.price, qty: parsed.qty, slaDays: parsed.slaDays, sla: parsed.sla,
+          subtotal: parsed.subtotal, tax: parsed.tax, shipping: parsed.shipping, total: parsed.total,
+          taxRatePct: parsed.taxRatePct, shippingFlat: parsed.shippingFlat, marginPct: parsed.marginPct, margin: parsed.margin,
+          versionCount: parsed.versionCount, versionEvents: parsed.versionEvents
+        };
       } else if (parsed.type === "document") {
         type = "document";
         message = parsed.text || parsed.filename || message;
         payload = { url: parsed.url, filename: parsed.filename };
+      } else if (parsed.type === "redline") {
+        type = "redline";
+        message = parsed.text || parsed.message || message;
+        payload = { original: parsed.original, suggested: parsed.suggested };
+      } else if (parsed.type === "signature") {
+        type = "signature";
+        message = parsed.text || "Signature";
+        payload = { imageUrl: parsed.imageUrl, label: parsed.label };
+      } else if (parsed.type === "payment_request") {
+        type = "payment_request";
+        message = parsed.text || "Payment request";
+        payload = { amount: parsed.amount, currency: parsed.currency, gateway: parsed.gateway, reference: parsed.reference };
       }
     } catch (_) {}
     const out = {
@@ -539,6 +587,23 @@ export async function getDealEvents(roomId, limit = 50) {
     newValue: r.new_value,
     createdAt: new Date(r.created_at),
   }));
+}
+
+// Room member roles (RBAC: member, manager)
+export async function getRoomMemberRoles(roomId) {
+  const rows = await db.all(
+    "SELECT room_id, username, role FROM room_member_roles WHERE room_id = ?",
+    [roomId]
+  );
+  return rows.map((r) => ({ roomId: r.room_id, username: r.username, role: r.role }));
+}
+
+export async function setRoomMemberRole(roomId, username, role) {
+  await db.run(
+    "INSERT OR REPLACE INTO room_member_roles (room_id, username, role) VALUES (?, ?, ?)",
+    [roomId, username, role]
+  );
+  return getRoomMemberRoles(roomId);
 }
 
 // Utility function for UUID generation

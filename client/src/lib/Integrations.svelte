@@ -8,6 +8,8 @@
   let emailConfig = { host: "", port: 587, secure: false, user: "", pass: "", from: "" };
   let smsConfig = { gatewayUrl: "", apiKey: "" };
   let whatsappConfig = { apiUrl: "", token: "", phoneId: "" };
+  let identityConfig = { iprsUrl: "", iprsKey: "", onfidoApiToken: "", stripeIdentityKey: "" };
+  let paymentsConfig = { mpesaConsumerKey: "", mpesaConsumerSecret: "", pesapalUrl: "", stripeSecretKey: "", paypalClientId: "" };
   let testTo = "";
   let testBody = "Test message from messaging platform.";
   let testSubject = "Test email";
@@ -26,6 +28,8 @@
       if (channel === "email") emailConfig = { ...emailConfig, ...(data.config || {}) };
       if (channel === "sms") smsConfig = { ...smsConfig, ...(data.config || {}) };
       if (channel === "whatsapp") whatsappConfig = { ...whatsappConfig, ...(data.config || {}) };
+      if (channel === "identity") identityConfig = { ...identityConfig, ...(data.config || {}) };
+      if (channel === "payments") paymentsConfig = { ...paymentsConfig, ...(data.config || {}) };
     } catch (e) {
       console.error(e);
     }
@@ -36,7 +40,7 @@
     error = "";
     message = "";
     try {
-      const body = channel === "email" ? emailConfig : channel === "sms" ? smsConfig : whatsappConfig;
+      const body = channel === "email" ? emailConfig : channel === "sms" ? smsConfig : channel === "whatsapp" ? whatsappConfig : channel === "identity" ? identityConfig : paymentsConfig;
       const res = await fetch(`${base()}/api/channels/${channel}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -122,6 +126,8 @@
       <button type="button" class="tab" class:active={activeChannel === "email"} onclick={() => setActive("email")}>Email (SMTP)</button>
       <button type="button" class="tab" class:active={activeChannel === "sms"} onclick={() => setActive("sms")}>SMS</button>
       <button type="button" class="tab" class:active={activeChannel === "whatsapp"} onclick={() => setActive("whatsapp")}>WhatsApp</button>
+      <button type="button" class="tab" class:active={activeChannel === "identity"} onclick={() => setActive("identity")}>Identity</button>
+      <button type="button" class="tab" class:active={activeChannel === "payments"} onclick={() => setActive("payments")}>Payments</button>
     </div>
 
     {#if activeChannel === "email"}
@@ -184,6 +190,35 @@
           <label>To (number) <input type="text" bind:value={testTo} placeholder="15551234567" /></label>
           <label>Body <textarea bind:value={testBody} rows="2"></textarea></label>
           <button type="button" class="btn-send" disabled={sending || !testTo} onclick={() => sendTest("whatsapp")}>{sending ? "Sending…" : "Send test"}</button>
+        </div>
+      </section>
+    {:else if activeChannel === "identity"}
+      <section class="channel-panel">
+        <h3>Identity verification</h3>
+        <p class="channel-desc">Local: IPRS (Kenya). Global: Onfido, Stripe Identity. Verify participants are who they say they are.</p>
+        <div class="form">
+          <label>IPRS API URL (Kenya) <input type="url" bind:value={identityConfig.iprsUrl} placeholder="https://iprs-api.example.com" /></label>
+          <label>IPRS API key <input type="password" bind:value={identityConfig.iprsKey} placeholder="API key" /></label>
+          <label>Onfido API token <input type="password" bind:value={identityConfig.onfidoApiToken} placeholder="Live or sandbox token" /></label>
+          <label>Stripe Identity publishable key <input type="text" bind:value={identityConfig.stripeIdentityKey} placeholder="pk_..." /></label>
+          <div class="actions">
+            <button type="button" class="btn-save" disabled={saving} onclick={() => saveConfig("identity")}>{saving ? "Saving…" : "Save config"}</button>
+          </div>
+        </div>
+      </section>
+    {:else if activeChannel === "payments"}
+      <section class="channel-panel">
+        <h3>Payments (dual-currency / dual-gateway)</h3>
+        <p class="channel-desc">Local: M-Pesa (Daraja), Pesapal. Global: Stripe, PayPal. Configure per room or org.</p>
+        <div class="form">
+          <label>M-Pesa (Daraja) consumer key <input type="text" bind:value={paymentsConfig.mpesaConsumerKey} placeholder="Consumer key" /></label>
+          <label>M-Pesa consumer secret <input type="password" bind:value={paymentsConfig.mpesaConsumerSecret} placeholder="Consumer secret" /></label>
+          <label>Pesapal base URL <input type="url" bind:value={paymentsConfig.pesapalUrl} placeholder="https://pay.pesapal.com" /></label>
+          <label>Stripe secret key <input type="password" bind:value={paymentsConfig.stripeSecretKey} placeholder="sk_..." /></label>
+          <label>PayPal client ID <input type="text" bind:value={paymentsConfig.paypalClientId} placeholder="Client ID" /></label>
+          <div class="actions">
+            <button type="button" class="btn-save" disabled={saving} onclick={() => saveConfig("payments")}>{saving ? "Saving…" : "Save config"}</button>
+          </div>
         </div>
       </section>
     {:else}

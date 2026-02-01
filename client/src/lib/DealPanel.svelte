@@ -119,7 +119,13 @@
     <p class="deal-row"><span class="deal-label">Margin ({marginPct}%)</span><span class="deal-value">{formatMoney(margin)}</span></p>
   </div>
 
-  <button type="button" class="deal-share" onclick={() => onSendTerms({ price, qty, slaDays })}>Share current terms</button>
+  <button type="button" class="deal-share" onclick={() => onSendTerms({
+    price, qty, slaDays,
+    taxRatePct, shippingFlat, marginPct,
+    subtotal, tax, shipping, total, margin,
+    versionCount: dealEvents.length,
+    versionEvents: dealEvents.slice(-10).map(e => ({ username: e.username, field: e.field, oldValue: e.oldValue, newValue: e.newValue, createdAt: e.createdAt }))
+  })}>Share current terms</button>
 
   <details class="deal-audit">
     <summary>Version history</summary>

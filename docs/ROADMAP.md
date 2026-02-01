@@ -20,7 +20,7 @@
 |------|--------|----------------|
 | **Deal block** | Done | `DealPanel` above messages: Current Terms (Price, Qty, SLA). Edits emit `update-deal-term`; server stores in `deal_events`. |
 | **Version history / audit trail** | Done | `deal_events` table + GET `/api/rooms/:roomId/deal-events`. “Version history” in DealPanel shows timeline (EAT). |
-| **Redlining lite** | Planned | Browser-native way to suggest changes to specific sentences (inline diff / suggestions) without Word. |
+| **Redlining lite** | Done | "Suggest edit" on text messages; message type `redline` with original/suggested; rendered as inline diff in chat. |
 
 ---
 
@@ -47,8 +47,8 @@
 
 | Goal | Status | Implementation |
 |------|--------|----------------|
-| **KDPP & GDPR ready** | Planned | Right to be Forgotten, Data Residency (e.g. Kenyan data in Kenya). Bake in from day one. |
-| **Role-based access (RBAC)** | Planned | B2B: Lead ↔ Sales Rep; Manager approves final discount. Robust approval workflow. |
+| **KDPP & GDPR ready** | Done | Settings: Privacy & compliance (Request data export, Request deletion, Data residency option). API stubs POST `/api/me/export`, `/api/me/delete`. |
+| **Role-based access (RBAC)** | Done | `room_member_roles` table; GET/POST `/api/rooms/:roomId/roles`. Assign member/manager; approval workflow placeholder. |
 
 ---
 

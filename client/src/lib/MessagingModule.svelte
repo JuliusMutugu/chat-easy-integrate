@@ -99,7 +99,10 @@
 
   async function loadRooms() {
     try {
-      const response = await fetch(`${config.serverUrl}/api/rooms`);
+      const url = config.username
+        ? `${config.serverUrl}/api/rooms?username=${encodeURIComponent(config.username)}`
+        : `${config.serverUrl}/api/rooms`;
+      const response = await fetch(url);
       rooms = await response.json();
     } catch (err) {
       error = "Failed to load rooms";
@@ -314,7 +317,7 @@
           </div>
         {:else if currentView === "settings"}
           <div class="view-wrap view-settings">
-            <Settings onBack={handleBackToRooms} />
+            <Settings onBack={handleBackToRooms} config={config} username={config.username} />
           </div>
         {:else if currentView === "integrations"}
           <div class="view-wrap view-integrations">

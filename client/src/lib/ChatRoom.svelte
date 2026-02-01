@@ -30,8 +30,205 @@
   let greetingDismissed = false;
   let showDealPanel = false;
   let showCalculator = false;
+  let showMembersList = false;
+  let showInvitePanel = false;
+  let inviteLinkValue = "";
+  let inviteEmail = "";
+  let showPaymentPanel = false;
+  let showSignPanel = false;
+  let showRedlinePanel = false;
+  let redlineMessage = null;
+  let redlineSuggested = "";
+  let paymentAmount = "";
+  let paymentCurrency = "KES";
+  let signatureDataUrl = "";
+  let signCanvasEl;
+  let signDrawing = false;
+  let signLastX = 0;
+  let signLastY = 0;
   let fileInputEl;
   let uploadInProgress = false;
+
+  async function ensureInviteLink() {
+    if (room.inviteToken) {
+      inviteLinkValue = typeof window !== "undefined" ? `${window.location.origin}?invite=${room.inviteToken}` : "";
+      return;
+    }
+    try {
+      const res = await fetch(`${config.serverUrl}/api/rooms/${room.id}`);
+      if (res.ok) {
+        const r = await res.json();
+        if (r.inviteToken) {
+          room.inviteToken = r.inviteToken;
+          room.code = r.code;
+          inviteLinkValue = typeof window !== "undefined" ? `${window.location.origin}?invite=${r.inviteToken}` : "";
+        }
+      }
+    } catch (_) {}
+  }
+
+  async function openInvitePanel() {
+    showInvitePanel = true;
+    inviteLinkValue = "";
+    await ensureInviteLink();
+    playClick();
+  }
+
+  function copyInviteLink() {
+    if (inviteLinkValue) {
+      navigator.clipboard.writeText(inviteLinkValue);
+      playSuccess();
+    }
+  }
+
+  function copyRoomCode() {
+    if (room.code) {
+      navigator.clipboard.writeText(String(room.code));
+      playSuccess();
+    }
+  }
+
+  async function generateNewInviteLink() {
+    try {
+      const res = await fetch(`${config.serverUrl}/api/rooms/${room.id}/invite`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ invitedBy: config.username }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        room.inviteToken = data.inviteToken;
+        inviteLinkValue = typeof window !== "undefined" ? `${window.location.origin}?invite=${data.inviteToken}` : "";
+        playSuccess();
+      }
+    } catch (_) {}
+  }
+
+  function sendEmailInvite() {
+    if (!inviteEmail.trim() || !inviteLinkValue) return;
+    const subject = `Join ${room.name} - Room Code: ${room.code ?? ""}`;
+    const body = `You're invited to join "${room.name}".
+
+Quick join:
+- Room Code: ${room.code ?? ""}
+- Direct Link: ${inviteLinkValue}
+
+Description: ${room.description ?? ""}
+
+How to join:
+1. Visit the platform
+2. Enter room code: ${room.code ?? ""}
+3. Or use the direct link above.`;
+    const mailtoLink = `mailto:${inviteEmail.trim()}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    window.open(mailtoLink);
+    inviteEmail = "";
+    playSuccess();
+  }
+
+  function copySimpleMessage() {
+    const text = `Join "${room.name}" - Room Code: ${room.code ?? ""}`;
+    navigator.clipboard.writeText(text);
+    playSuccess();
+  }
+
+  function copyDetailedMessage() {
+    const text = `You're invited to "${room.name}". Code: ${room.code ?? ""}. Link: ${inviteLinkValue}. ${room.description ?? ""}`;
+    navigator.clipboard.writeText(text);
+    playSuccess();
+  }
+
+  function openSuggestEdit(msg) {
+    redlineMessage = msg;
+    redlineSuggested = msg.message || "";
+    showRedlinePanel = true;
+    playClick();
+  }
+
+  function sendRedline() {
+    if (!socket || !redlineMessage || !redlineSuggested.trim()) return;
+    socket.emit("send-message", {
+      message: "Suggested edit",
+      type: "redline",
+      payload: { original: redlineMessage.message, suggested: redlineSuggested.trim() },
+    });
+    showRedlinePanel = false;
+    redlineMessage = null;
+    redlineSuggested = "";
+    playSuccess();
+  }
+
+  function sendPaymentRequest() {
+    if (!socket || !paymentAmount.trim()) return;
+    const amount = parseFloat(paymentAmount) || 0;
+    socket.emit("send-message", {
+      message: "Payment request",
+      type: "payment_request",
+      payload: { amount, currency: paymentCurrency, gateway: "stub", reference: "PAY-" + Date.now() },
+    });
+    showPaymentPanel = false;
+    paymentAmount = "";
+    paymentCurrency = "KES";
+    playSuccess();
+  }
+
+  function openSignPanel() {
+    signatureDataUrl = "";
+    showSignPanel = true;
+    playClick();
+  }
+
+  function captureSignature() {
+    if (!signCanvasEl) return;
+    signatureDataUrl = signCanvasEl.toDataURL("image/png");
+    playSuccess();
+  }
+
+  function signStart(e) {
+    if (!signCanvasEl) return;
+    signDrawing = true;
+    const rect = signCanvasEl.getBoundingClientRect();
+    signLastX = (e.clientX || e.touches?.[0]?.clientX) - rect.left;
+    signLastY = (e.clientY || e.touches?.[0]?.clientY) - rect.top;
+  }
+
+  function signMove(e) {
+    if (!signDrawing || !signCanvasEl) return;
+    e.preventDefault();
+    const rect = signCanvasEl.getBoundingClientRect();
+    const x = (e.clientX || e.touches?.[0]?.clientX) - rect.left;
+    const y = (e.clientY || e.touches?.[0]?.clientY) - rect.top;
+    const ctx = signCanvasEl.getContext("2d");
+    ctx.strokeStyle = "#111";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(signLastX, signLastY);
+    ctx.lineTo(x, y);
+    ctx.stroke();
+    signLastX = x;
+    signLastY = y;
+  }
+
+  function signEnd() {
+    signDrawing = false;
+  }
+
+  function sendSignature() {
+    if (!socket || !signatureDataUrl) return;
+    socket.emit("send-message", {
+      message: "Signature",
+      type: "signature",
+      payload: { imageUrl: signatureDataUrl, label: "Signed" },
+    });
+    showSignPanel = false;
+    signatureDataUrl = "";
+    playSuccess();
+  }
+
+  function openInvoice() {
+    const url = `${config.serverUrl}/api/rooms/${room.id}/invoice?reference=INV-${Date.now()}`;
+    window.open(url, "_blank");
+    playClick();
+  }
 
   const QUICK_REPLIES = [
     "Yes",
@@ -466,6 +663,12 @@
     });
   }
 
+  function formatDealVal(v) {
+    if (v == null) return "—";
+    if (typeof v === "number") return v.toLocaleString("en-KE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    return v;
+  }
+
   function getMessageClass(message) {
     if (message.type === "system") return "system-message";
     if (message.type === "negotiation-start") return "negotiation-message";
@@ -551,16 +754,27 @@
       <button type="button" class="btn-back" onclick={onLeaveRoom}>Leave</button>
       <div class="room-meta">
         <h3 class="room-name">{room.name}</h3>
-        <span class="user-count">{userCount} online</span>
-        {#if room.createdByUsername === config.username && users.length > 0}
-          <div class="members-list" role="list">
+        <button
+          type="button"
+          class="active-users-trigger"
+          onclick={() => (showMembersList = !showMembersList)}
+          aria-expanded={showMembersList}
+          aria-label="Active users in this room"
+        >
+          <span class="user-count">Active users ({userCount})</span>
+          <span class="active-users-chevron" aria-hidden="true">{showMembersList ? "▼" : "▶"}</span>
+        </button>
+        {#if showMembersList}
+          <div class="members-list-wrap" role="list">
             {#each users as u}
               <div class="member-row" role="listitem">
-                <span class="member-name">{u}</span>
-                {#if u !== config.username}
+                <span class="member-name">{u}{#if u === config.username} <span class="you-badge">(you)</span>{/if}</span>
+                {#if room.createdByUsername === config.username && u !== config.username}
                   <button type="button" class="btn-remove-member" onclick={() => removeMember(u)} title="Remove from room" aria-label="Remove {u} from room">Remove</button>
                 {/if}
               </div>
+            {:else}
+              <div class="member-row empty">No one else in the room yet.</div>
             {/each}
           </div>
         {/if}
@@ -568,6 +782,17 @@
     </div>
 
     <div class="header-right">
+      {#if room.createdByUsername === config.username}
+        <button
+          type="button"
+          class="btn-invite-header"
+          onclick={openInvitePanel}
+          title="Invite someone to this room"
+          aria-label="Invite to room"
+        >
+          Invite
+        </button>
+      {/if}
       {#if !isNegotiationActive}
         <button
           type="button"
@@ -581,6 +806,186 @@
       {/if}
     </div>
   </header>
+
+  {#if showInvitePanel}
+    <div
+      class="drawer-overlay"
+      role="dialog"
+      aria-label="Invite to room"
+      tabindex="-1"
+      onclick={(e) => e.target === e.currentTarget && (showInvitePanel = false)}
+      onkeydown={(e) => e.key === "Escape" && (showInvitePanel = false)}
+    >
+      <div class="drawer-panel invite-drawer" role="region" aria-label="Invite panel">
+        <div class="drawer-header">
+          <h3 class="drawer-title">Invite to this room</h3>
+          <button type="button" class="drawer-close" onclick={() => (showInvitePanel = false)} aria-label="Close">×</button>
+        </div>
+        <div class="drawer-body">
+          <p class="invite-hint">Share the link or room code so others can join.</p>
+          {#if room.code != null}
+            <div class="invite-row">
+              <label for="invite-room-code" class="invite-label">Room code</label>
+              <div class="invite-input-row">
+                <input id="invite-room-code" type="text" readonly value={room.code} class="invite-input" />
+                <button type="button" class="btn-copy" onclick={copyRoomCode}>Copy code</button>
+              </div>
+            </div>
+          {/if}
+          <div class="invite-row">
+            <label for="invite-link-input" class="invite-label">Direct link</label>
+            <div class="invite-input-row">
+              <input id="invite-link-input" type="text" readonly value={inviteLinkValue} class="invite-input" placeholder="Loading…" />
+              <button type="button" class="btn-copy" onclick={copyInviteLink} disabled={!inviteLinkValue}>Copy link</button>
+            </div>
+            <div class="invite-extra">
+              <button type="button" class="btn-generate-link" onclick={generateNewInviteLink}>Generate new link</button>
+              <small>Use if the current link is compromised</small>
+            </div>
+          </div>
+
+          <section class="invite-section-block">
+            <h4 class="invite-section-title">Email invitation</h4>
+            <div class="invite-email-row">
+              <input
+                type="email"
+                bind:value={inviteEmail}
+                placeholder="Enter email address"
+                class="invite-email-input"
+                id="invite-email-input"
+              />
+              <button
+                type="button"
+                class="btn-copy btn-copy-email"
+                onclick={sendEmailInvite}
+                disabled={!inviteEmail.trim() || !inviteLinkValue}
+              >
+                Send
+              </button>
+            </div>
+          </section>
+
+          <section class="invite-section-block">
+            <h4 class="invite-section-title">Share</h4>
+            <div class="invite-share-row">
+              <button
+                type="button"
+                class="btn-share-option"
+                onclick={() => window.open(`https://wa.me/?text=${encodeURIComponent(`Join "${room.name}". Room Code: ${room.code ?? ""}. Link: ${inviteLinkValue}`)}`)}
+                disabled={!inviteLinkValue}
+              >
+                WhatsApp
+              </button>
+              <button
+                type="button"
+                class="btn-share-option"
+                onclick={() => window.open(`https://t.me/share/url?url=${encodeURIComponent(inviteLinkValue)}&text=${encodeURIComponent(`Join "${room.name}". Code: ${room.code ?? ""}`)}`)}
+                disabled={!inviteLinkValue}
+              >
+                Telegram
+              </button>
+              <button
+                type="button"
+                class="btn-share-option"
+                onclick={() => window.open(`https://twitter.com/intent/tweet?text=${encodeURIComponent(`Join "${room.name}". Code: ${room.code ?? ""}`)}&url=${encodeURIComponent(inviteLinkValue)}`)}
+                disabled={!inviteLinkValue}
+              >
+                Twitter
+              </button>
+            </div>
+          </section>
+
+          <section class="invite-section-block">
+            <h4 class="invite-section-title">Quick copy</h4>
+            <div class="invite-quickcopy-row">
+              <button type="button" class="btn-quickcopy" onclick={copySimpleMessage}>
+                Simple message
+              </button>
+              <button type="button" class="btn-quickcopy" onclick={copyDetailedMessage} disabled={!inviteLinkValue}>
+                Detailed message
+              </button>
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+  {/if}
+
+  {#if showRedlinePanel && redlineMessage}
+    <div class="drawer-overlay" role="dialog" aria-label="Suggest edit" tabindex="-1" onclick={(e) => e.target === e.currentTarget && (showRedlinePanel = false)} onkeydown={(e) => e.key === "Escape" && (showRedlinePanel = false)}>
+      <div class="drawer-panel invite-drawer" role="region" aria-label="Suggest edit panel">
+        <div class="drawer-header">
+          <h3 class="drawer-title">Suggest edit (redlining)</h3>
+          <button type="button" class="drawer-close" onclick={() => (showRedlinePanel = false)} aria-label="Close">×</button>
+        </div>
+        <div class="drawer-body">
+          <p class="invite-label">Original</p>
+          <p class="redline-original-block">{redlineMessage.message}</p>
+          <label class="invite-label" for="redline-suggested">Suggested text</label>
+          <textarea id="redline-suggested" bind:value={redlineSuggested} class="invite-input" rows="4" placeholder="Enter suggested text"></textarea>
+          <div class="drawer-actions">
+            <button type="button" class="btn-copy" onclick={sendRedline} disabled={!redlineSuggested.trim()}>Send suggestion</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  {/if}
+
+  {#if showPaymentPanel}
+    <div class="drawer-overlay" role="dialog" aria-label="Request payment" tabindex="-1" onclick={(e) => e.target === e.currentTarget && (showPaymentPanel = false)} onkeydown={(e) => e.key === "Escape" && (showPaymentPanel = false)}>
+      <div class="drawer-panel invite-drawer" role="region" aria-label="Payment request panel">
+        <div class="drawer-header">
+          <h3 class="drawer-title">Request payment</h3>
+          <button type="button" class="drawer-close" onclick={() => (showPaymentPanel = false)} aria-label="Close">×</button>
+        </div>
+        <div class="drawer-body">
+          <label class="invite-label" for="payment-amount">Amount</label>
+          <input id="payment-amount" type="number" step="0.01" bind:value={paymentAmount} class="invite-input" placeholder="0.00" />
+          <label class="invite-label" for="payment-currency">Currency</label>
+          <select id="payment-currency" bind:value={paymentCurrency} class="invite-input">
+            <option value="KES">KES</option>
+            <option value="USD">USD</option>
+            <option value="EUR">EUR</option>
+          </select>
+          <div class="drawer-actions">
+            <button type="button" class="btn-copy" onclick={sendPaymentRequest} disabled={!paymentAmount.trim()}>Send request</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  {/if}
+
+  {#if showSignPanel}
+    <div class="drawer-overlay" role="dialog" aria-label="Sign" tabindex="-1" onclick={(e) => e.target === e.currentTarget && (showSignPanel = false)} onkeydown={(e) => e.key === "Escape" && (showSignPanel = false)}>
+      <div class="drawer-panel invite-drawer" role="region" aria-label="Signature panel">
+        <div class="drawer-header">
+          <h3 class="drawer-title">E-signature</h3>
+          <button type="button" class="drawer-close" onclick={() => (showSignPanel = false)} aria-label="Close">×</button>
+        </div>
+        <div class="drawer-body">
+          <p class="invite-hint">Draw your signature below, then capture and send.</p>
+          <canvas
+            bind:this={signCanvasEl}
+            width="320"
+            height="120"
+            class="signature-canvas"
+            style="border:2px solid var(--border);border-radius:8px;background:var(--card-bg);touch-action:none;cursor:crosshair;"
+            onmousedown={signStart}
+            onmousemove={signMove}
+            onmouseup={signEnd}
+            onmouseleave={signEnd}
+            ontouchstart={signStart}
+            ontouchmove={signMove}
+            ontouchend={signEnd}
+          ></canvas>
+          <div class="drawer-actions">
+            <button type="button" class="btn-generate-link" onclick={captureSignature}>Capture</button>
+            <button type="button" class="btn-copy" onclick={sendSignature} disabled={!signatureDataUrl}>Send signature</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  {/if}
 
   <div class="tools-bar">
     <button
@@ -618,6 +1023,9 @@
     >
       {uploadInProgress ? "Uploading…" : "Upload"}
     </button>
+    <button type="button" class="btn-tool" onclick={() => { showPaymentPanel = true; playClick(); }} title="Request payment">Request payment</button>
+    <button type="button" class="btn-tool" onclick={openSignPanel} title="Add signature">Sign</button>
+    <button type="button" class="btn-tool" onclick={openInvoice} title="Generate invoice">Invoice</button>
   </div>
 
   {#if showDealPanel}
@@ -728,6 +1136,7 @@
           <div class="message-header">
             <span class="msg-username">{message.username}</span>
             <button type="button" class="msg-reply-btn" onclick={() => replyToMessage(message)} title="Reply to this message">Reply</button>
+            <button type="button" class="msg-reply-btn" onclick={() => openSuggestEdit(message)} title="Suggest edit (redlining)">Suggest edit</button>
             <span class="msg-time">{formatTime(message.timestamp)}</span>
           </div>
           {#if message.replyToMessageId}
@@ -796,9 +1205,15 @@
             <p class="deal-terms-label">{message.message}</p>
             {#if message.payload}
               <ul class="deal-terms-list">
-                <li>Price: {message.payload.price ?? "—"}</li>
+                <li>Price: {formatDealVal(message.payload.price)}</li>
                 <li>Qty: {message.payload.qty ?? "—"}</li>
                 <li>SLA (days): {message.payload.slaDays ?? message.payload.sla ?? "—"}</li>
+                {#if message.payload.subtotal != null}<li>Subtotal: {formatDealVal(message.payload.subtotal)}</li>{/if}
+                {#if message.payload.tax != null}<li>Tax: {formatDealVal(message.payload.tax)}</li>{/if}
+                {#if message.payload.shipping != null}<li>Shipping: {formatDealVal(message.payload.shipping)}</li>{/if}
+                {#if message.payload.total != null}<li><strong>Total: {formatDealVal(message.payload.total)}</strong></li>{/if}
+                {#if message.payload.margin != null}<li>Margin: {formatDealVal(message.payload.margin)}</li>{/if}
+                {#if message.payload.versionCount != null && message.payload.versionCount > 0}<li class="deal-terms-versions">Version history: {message.payload.versionCount} change(s)</li>{/if}
               </ul>
             {/if}
             {#if message.status === "pending"}
@@ -823,6 +1238,40 @@
             {:else if message.username === config.username}
               <span class="document-status">Sent</span>
             {/if}
+          </div>
+        {:else if message.type === "redline"}
+          <div class="message-header">
+            <span class="msg-username">{message.username}</span>
+            <span class="msg-time">{formatTime(message.timestamp)}</span>
+          </div>
+          <div class="redline-msg">
+            <p class="redline-label">Suggested edit</p>
+            {#if message.payload?.original}
+              <p class="redline-original"><del>{message.payload.original}</del></p>
+            {/if}
+            {#if message.payload?.suggested}
+              <p class="redline-suggested">{message.payload.suggested}</p>
+            {/if}
+          </div>
+        {:else if message.type === "signature"}
+          <div class="message-header">
+            <span class="msg-username">{message.username}</span>
+            <span class="msg-time">{formatTime(message.timestamp)}</span>
+          </div>
+          <div class="signature-msg">
+            {#if message.payload?.imageUrl}
+              <img src={message.payload.imageUrl} alt="Signature" class="signature-img" />
+            {/if}
+            {#if message.payload?.label}<p class="signature-label">{message.payload.label}</p>{/if}
+          </div>
+        {:else if message.type === "payment_request"}
+          <div class="message-header">
+            <span class="msg-username">{message.username}</span>
+            <span class="msg-time">{formatTime(message.timestamp)}</span>
+          </div>
+          <div class="payment-msg">
+            <p class="payment-label">Payment request: {message.payload?.amount ?? "—"} {message.payload?.currency ?? "KES"}</p>
+            <a href={`${config.serverUrl}/api/rooms/${room.id}/invoice?amount=${message.payload?.amount ?? ''}&currency=${message.payload?.currency ?? 'KES'}&reference=${message.payload?.reference ?? ''}`} target="_blank" rel="noopener noreferrer" class="document-link">View invoice</a>
           </div>
         {:else}
           <div class="system-msg">
@@ -956,7 +1405,7 @@
 
   .chat-header {
     padding: 1rem 1.25rem;
-    border-bottom: 1px solid var(--border);
+    border-bottom: 2px solid var(--border);
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -965,6 +1414,7 @@
     background: var(--bg-secondary);
     flex-shrink: 0;
     transition: background-color var(--duration-normal) var(--ease-in-out);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
   }
 
   .header-left {
@@ -1009,14 +1459,53 @@
     color: var(--gray-600);
   }
 
-  .members-list {
-    margin-top: 0.5rem;
-    padding-top: 0.5rem;
-    border-top: 1px solid var(--border);
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.5rem;
+  .active-users-trigger {
+    display: inline-flex;
     align-items: center;
+    gap: 0.35rem;
+    margin-top: 0.25rem;
+    padding: 0.35rem 0.5rem;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    color: var(--navy-700);
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    cursor: pointer;
+    font-family: inherit;
+    transition: background-color 0.15s ease, border-color 0.15s ease;
+  }
+
+  .active-users-trigger:hover {
+    background: var(--gray-100);
+    border-color: var(--gray-300);
+  }
+
+  .active-users-chevron {
+    font-size: 0.7rem;
+    color: var(--gray-500);
+  }
+
+  .members-list-wrap {
+    margin-top: 0.5rem;
+    padding: 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--bg-primary);
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+  }
+
+  .you-badge {
+    font-size: 0.75rem;
+    color: var(--gray-500);
+    font-weight: 400;
+  }
+
+  .member-row.empty {
+    color: var(--gray-500);
+    font-style: italic;
   }
 
   .member-row {
@@ -1053,6 +1542,25 @@
   .header-right {
     display: flex;
     align-items: center;
+    gap: 0.5rem;
+  }
+
+  .btn-invite-header {
+    background: var(--navy-700);
+    color: var(--white);
+    border: none;
+    border-radius: 8px;
+    padding: 0.5rem 1rem;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 0.875rem;
+    font-family: inherit;
+    transition: background-color 0.15s ease, transform 0.2s var(--ease-spring);
+  }
+
+  .btn-invite-header:hover {
+    background: var(--navy-800);
+    transform: translateY(-1px);
   }
 
   .btn-negotiate {
@@ -1071,6 +1579,191 @@
   .btn-negotiate:hover {
     background: var(--green-700);
     transform: translateY(-1px);
+  }
+
+  .invite-hint {
+    margin: 0 0 1rem;
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+  }
+
+  .invite-row {
+    margin-bottom: 1rem;
+  }
+
+  .invite-label {
+    display: block;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-bottom: 0.35rem;
+  }
+
+  .invite-input-row {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+  }
+
+  .invite-input {
+    flex: 1;
+    padding: 0.5rem 0.75rem;
+    border: 2px solid var(--border);
+    border-radius: 8px;
+    font-size: 0.875rem;
+    background: var(--input-bg);
+    color: var(--text-primary);
+    font-family: inherit;
+  }
+
+  .btn-copy {
+    padding: 0.5rem 0.75rem;
+    background: var(--green-600);
+    color: var(--white);
+    border: none;
+    border-radius: 8px;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: inherit;
+    transition: background-color 0.15s ease;
+  }
+
+  .btn-copy:hover:not(:disabled) {
+    background: var(--green-700);
+  }
+
+  .btn-copy:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  .invite-extra {
+    margin-top: 0.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+
+  .invite-extra small {
+    font-size: 0.75rem;
+    color: var(--gray-500);
+  }
+
+  .btn-generate-link {
+    align-self: flex-start;
+    padding: 0.5rem 1rem;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    color: var(--text-primary);
+    cursor: pointer;
+    font-family: inherit;
+    transition: background-color 0.15s ease, border-color 0.15s ease;
+  }
+
+  .btn-generate-link:hover {
+    background: var(--gray-100);
+    border-color: var(--gray-300);
+  }
+
+  .invite-section-block {
+    margin-top: 1.25rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border);
+  }
+
+  .invite-section-title {
+    margin: 0 0 0.5rem;
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+
+  .invite-email-row {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+  }
+
+  .invite-email-input {
+    flex: 1;
+    padding: 0.5rem 0.75rem;
+    border: 2px solid var(--border);
+    border-radius: 8px;
+    font-size: 0.875rem;
+    background: var(--input-bg);
+    color: var(--text-primary);
+    font-family: inherit;
+  }
+
+  .invite-email-input:focus {
+    outline: none;
+    border-color: var(--green-600);
+  }
+
+  .btn-copy-email {
+    flex-shrink: 0;
+  }
+
+  .invite-share-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .btn-share-option {
+    padding: 0.5rem 0.75rem;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    color: var(--text-primary);
+    cursor: pointer;
+    font-family: inherit;
+    transition: background-color 0.15s ease, border-color 0.15s ease;
+  }
+
+  .btn-share-option:hover:not(:disabled) {
+    background: var(--gray-100);
+    border-color: var(--gray-300);
+  }
+
+  .btn-share-option:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  .invite-quickcopy-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .btn-quickcopy {
+    padding: 0.5rem 0.75rem;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    color: var(--text-primary);
+    cursor: pointer;
+    font-family: inherit;
+    transition: background-color 0.15s ease, border-color 0.15s ease;
+  }
+
+  .btn-quickcopy:hover:not(:disabled) {
+    background: var(--gray-100);
+    border-color: var(--gray-300);
+  }
+
+  .btn-quickcopy:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
   }
 
   .negotiation-badge {
@@ -1228,6 +1921,85 @@
     margin-top: 0.35rem;
     font-size: 0.75rem;
     color: var(--gray-500);
+  }
+
+  .redline-msg {
+    background: var(--gray-50);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 0.75rem 1rem;
+    margin-top: 0.5rem;
+  }
+
+  .redline-label {
+    margin: 0 0 0.35rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--gray-600);
+  }
+
+  .redline-original {
+    margin: 0.25rem 0;
+    font-size: 0.875rem;
+    color: var(--gray-600);
+  }
+
+  .redline-suggested {
+    margin: 0.25rem 0 0;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: var(--navy-800);
+  }
+
+  .redline-original-block {
+    margin: 0 0 0.5rem;
+    padding: 0.5rem;
+    background: var(--gray-100);
+    border-radius: 8px;
+    font-size: 0.875rem;
+    color: var(--gray-700);
+  }
+
+  .signature-msg {
+    background: var(--gray-50);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 0.75rem 1rem;
+    margin-top: 0.5rem;
+  }
+
+  .signature-img {
+    max-width: 200px;
+    max-height: 80px;
+    display: block;
+    margin-top: 0.35rem;
+  }
+
+  .signature-label {
+    margin: 0.25rem 0 0;
+    font-size: 0.75rem;
+    color: var(--gray-500);
+  }
+
+  .payment-msg {
+    background: var(--gray-50);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 0.75rem 1rem;
+    margin-top: 0.5rem;
+  }
+
+  .payment-label {
+    margin: 0 0 0.35rem;
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--navy-800);
+  }
+
+  .drawer-actions {
+    margin-top: 1rem;
+    display: flex;
+    gap: 0.5rem;
   }
 
   .deal-terms-widget {

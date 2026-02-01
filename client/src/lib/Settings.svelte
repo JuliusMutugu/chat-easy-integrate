@@ -1,14 +1,19 @@
 <script>
   import { onMount } from "svelte";
   import { getEnterToSend, setEnterToSend, getCustomSnippets, addCustomSnippet, removeCustomSnippet } from "./theme.js";
-  import { playClick } from "./theme.js";
+  import { playClick, playSuccess } from "./theme.js";
 
   export let onBack = () => {};
+  export let config = { serverUrl: "http://localhost:3000" };
+  export let username = "";
 
   let enterToSend = true;
   let snippets = [];
   let newSnippetName = "";
   let newSnippetBody = "";
+  let dataResidency = "default";
+  let privacyMessage = "";
+  let privacyError = "";
 
   onMount(() => {
     enterToSend = getEnterToSend();
@@ -34,6 +39,45 @@
     removeCustomSnippet(id);
     snippets = getCustomSnippets();
     playClick();
+  }
+
+  async function requestDataExport() {
+    privacyMessage = "";
+    privacyError = "";
+    try {
+      const res = await fetch(`${config.serverUrl}/api/me/export`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: username || "me" }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        privacyMessage = data.message || "Export requested.";
+        playSuccess();
+      } else privacyError = data.error || "Request failed";
+    } catch (e) {
+      privacyError = e.message || "Request failed";
+    }
+  }
+
+  async function requestDeletion() {
+    if (!confirm("Request deletion of all your data (Right to be Forgotten)? This cannot be undone.")) return;
+    privacyMessage = "";
+    privacyError = "";
+    try {
+      const res = await fetch(`${config.serverUrl}/api/me/delete`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: username || "me" }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        privacyMessage = data.message || "Deletion requested.";
+        playSuccess();
+      } else privacyError = data.error || "Request failed";
+    } catch (e) {
+      privacyError = e.message || "Request failed";
+    }
   }
 </script>
 
@@ -86,6 +130,28 @@
           <li class="snippet-empty">No custom snippets yet. Add one above.</li>
         {/each}
       </ul>
+    </section>
+
+    <section class="settings-section" aria-labelledby="privacy-heading">
+      <h3 id="privacy-heading">Privacy & compliance (KDPP / GDPR)</h3>
+      <p class="setting-desc block">Right to be Forgotten, data export, and data residency.</p>
+      {#if privacyMessage}<div class="banner success" role="status">{privacyMessage}</div>{/if}
+      {#if privacyError}<div class="banner err" role="alert">{privacyError}</div>{/if}
+      <div class="privacy-actions">
+        <button type="button" class="btn-save" onclick={requestDataExport}>Request data export</button>
+        <button type="button" class="btn-delete" onclick={requestDeletion}>Request deletion (Right to be Forgotten)</button>
+      </div>
+      <div class="setting-row">
+        <div class="setting-label">
+          <span class="setting-name">Data residency</span>
+          <span class="setting-desc">Prefer storing data in a specific region (e.g. Kenya). Placeholder.</span>
+        </div>
+        <select bind:value={dataResidency} class="select-residency" aria-label="Data residency">
+          <option value="default">Default</option>
+          <option value="ke">Kenya</option>
+          <option value="eu">EU (GDPR)</option>
+        </select>
+      </div>
     </section>
   </div>
 </div>
@@ -290,5 +356,58 @@
 
   .toggle.on .toggle-thumb {
     transform: translateX(20px);
+  }
+
+  .banner {
+    padding: 0.5rem 0.75rem;
+    border-radius: 8px;
+    margin-bottom: 0.75rem;
+    font-size: 0.875rem;
+  }
+
+  .banner.success {
+    background: var(--green-100);
+    color: var(--green-800);
+  }
+
+  .banner.err {
+    background: var(--gray-100);
+    color: var(--gray-900);
+    border: 1px solid var(--gray-300);
+  }
+
+  .privacy-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+  }
+
+  .btn-delete {
+    padding: 0.5rem 1rem;
+    border-radius: 8px;
+    border: 1px solid var(--gray-400);
+    background: var(--card-bg);
+    color: var(--gray-700);
+    font-size: 0.875rem;
+    font-weight: 500;
+    font-family: inherit;
+    cursor: pointer;
+    transition: background-color 0.15s ease, border-color 0.15s ease;
+  }
+
+  .btn-delete:hover {
+    background: var(--gray-100);
+    border-color: var(--gray-500);
+  }
+
+  .select-residency {
+    padding: 0.5rem 0.75rem;
+    border: 2px solid var(--border);
+    border-radius: 8px;
+    font-size: 0.875rem;
+    font-family: inherit;
+    background: var(--input-bg);
+    color: var(--text-primary);
   }
 </style>

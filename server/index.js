@@ -17,6 +17,7 @@ import {
   getRoomByCode,
   getRoomByInviteToken,
   getAllRooms,
+  getRoomsForUser,
   updateRoomInviteToken,
   addUserToRoom,
   removeUserFromRoom,
@@ -34,6 +35,8 @@ import {
   saveOutboundMessage,
   addDealEvent,
   getDealEvents,
+  getRoomMemberRoles,
+  setRoomMemberRole,
 } from "./database.js";
 import { sendEmail, validateEmailConfig } from "./channels/email.js";
 import { sendSms, sendSmsDev, validateSmsConfig } from "./channels/sms.js";
@@ -139,7 +142,8 @@ function generateInviteToken() {
 
 app.get("/api/rooms", async (req, res) => {
   try {
-    const rooms = await getAllRooms();
+    const username = req.query.username;
+    const rooms = username ? await getRoomsForUser(username) : await getAllRooms();
     res.json(rooms);
   } catch (error) {
     console.error("Error fetching rooms:", error);
@@ -222,6 +226,69 @@ app.get("/api/rooms/:roomId/deal-events", async (req, res) => {
   } catch (error) {
     console.error("Error fetching deal events:", error);
     res.status(500).json({ error: "Failed to fetch deal events" });
+  }
+});
+
+app.get("/api/rooms/:roomId/invoice", async (req, res) => {
+  try {
+    const { roomId } = req.params;
+    const room = await getRoomById(roomId);
+    if (!room) return res.status(404).json({ error: "Room not found" });
+    const { amount, currency = "KES", reference = "INV-" + Date.now() } = req.query;
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Invoice</title></head><body><h1>Invoice</h1><p>Room: ${room.name}</p><p>Reference: ${reference}</p><p>Amount: ${amount ?? "—"} ${currency}</p><p>KRA/VAT compliant placeholder. Configure smart invoicing in Settings.</p></body></html>`;
+    res.setHeader("Content-Type", "text/html");
+    res.send(html);
+  } catch (error) {
+    console.error("Error generating invoice:", error);
+    res.status(500).json({ error: "Failed to generate invoice" });
+  }
+});
+
+app.get("/api/rooms/:roomId/roles", async (req, res) => {
+  try {
+    const { roomId } = req.params;
+    const room = await getRoomById(roomId);
+    if (!room) return res.status(404).json({ error: "Room not found" });
+    const roles = await getRoomMemberRoles(roomId);
+    res.json(roles);
+  } catch (error) {
+    console.error("Error fetching roles:", error);
+    res.status(500).json({ error: "Failed to fetch roles" });
+  }
+});
+
+app.post("/api/rooms/:roomId/roles", async (req, res) => {
+  try {
+    const { roomId } = req.params;
+    const { username, role } = req.body;
+    const room = await getRoomById(roomId);
+    if (!room) return res.status(404).json({ error: "Room not found" });
+    if (!username || !role) return res.status(400).json({ error: "username and role required" });
+    const roles = await setRoomMemberRole(roomId, username, role);
+    res.json(roles);
+  } catch (error) {
+    console.error("Error setting role:", error);
+    res.status(500).json({ error: "Failed to set role" });
+  }
+});
+
+app.post("/api/me/export", async (req, res) => {
+  try {
+    const { username } = req.body || {};
+    if (!username) return res.status(400).json({ error: "username required" });
+    res.json({ status: "queued", message: "Data export requested. You will receive a link when ready. (KDPP/GDPR placeholder)" });
+  } catch (error) {
+    res.status(500).json({ error: "Export failed" });
+  }
+});
+
+app.post("/api/me/delete", async (req, res) => {
+  try {
+    const { username } = req.body || {};
+    if (!username) return res.status(400).json({ error: "username required" });
+    res.json({ status: "accepted", message: "Right to be Forgotten request received. Data will be removed within 30 days. (KDPP/GDPR placeholder)" });
+  } catch (error) {
+    res.status(500).json({ error: "Delete request failed" });
   }
 });
 
@@ -619,6 +686,12 @@ io.on("connection", (socket) => {
         messageContent = JSON.stringify({ type: "deal_terms", text: message || "Deal terms", ...payload });
       } else if (type === "document" && payload && payload.url) {
         messageContent = JSON.stringify({ type: "document", text: message || payload.filename, url: payload.url, filename: payload.filename });
+      } else if (type === "redline" && payload) {
+        messageContent = JSON.stringify({ type: "redline", text: message || "Suggested edit", original: payload.original, suggested: payload.suggested });
+      } else if (type === "signature" && payload) {
+        messageContent = JSON.stringify({ type: "signature", text: message || "Signature", imageUrl: payload.imageUrl, label: payload.label });
+      } else if (type === "payment_request" && payload) {
+        messageContent = JSON.stringify({ type: "payment_request", text: message || "Payment request", ...payload });
       } else if (type === "location" && location) {
         locationData = {
           latitude: location.latitude,
@@ -659,6 +732,18 @@ io.on("connection", (socket) => {
         fullMessageData.message = message || payload.filename;
         fullMessageData.payload = payload;
         fullMessageData.documentUrl = payload.url;
+      }
+      if (type === "redline" && payload) {
+        fullMessageData.message = message || "Suggested edit";
+        fullMessageData.payload = payload;
+      }
+      if (type === "signature" && payload) {
+        fullMessageData.message = message || "Signature";
+        fullMessageData.payload = payload;
+      }
+      if (type === "payment_request" && payload) {
+        fullMessageData.message = message || "Payment request";
+        fullMessageData.payload = payload;
       }
 
       io.to(roomId).emit("new-message", fullMessageData);

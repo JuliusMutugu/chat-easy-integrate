@@ -148,24 +148,25 @@
 <main class="landing">
   <header class="nav">
     <div class="nav-inner">
-      <button type="button" class="nav-logo" onclick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>Messaging</button>
+      <button type="button" class="nav-logo" onclick={() => { playClick(); toggleModule(); }} title="Home (your rooms)">Messaging</button>
       <nav class="nav-links" aria-label="Main">
+        <button type="button" class="nav-link nav-link-btn" onclick={() => { playClick(); toggleModule(); }} title="Home – your rooms and messages">
+          Home
+        </button>
         <a href="#features" class="nav-link">Features</a>
         <a href="#built" class="nav-link">What's live</a>
         <a href="#coming" class="nav-link">Coming next</a>
         <a href="#pricing" class="nav-link">Pricing</a>
-        <button type="button" class="nav-link nav-link-btn" onclick={() => { playClick(); toggleModule(); }}>
-          Dashboard
-        </button>
+        <button type="button" class="nav-link nav-link-btn" onclick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>Landing</button>
       </nav>
       <div class="nav-actions">
         <button
           type="button"
           class="nav-btn nav-btn-ghost nav-dashboard-mobile"
           onclick={() => { playClick(); toggleModule(); }}
-          aria-label="Open dashboard"
+          aria-label="Home – your rooms"
         >
-          Dashboard
+          Home
         </button>
         <button
           type="button"
