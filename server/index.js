@@ -22,7 +22,13 @@ import {
   deletePendingJoinRequest,
   saveMessage,
   getRoomMessages,
+  getChannelConfig,
+  setChannelConfig,
+  saveOutboundMessage,
 } from "./database.js";
+import { sendEmail, validateEmailConfig } from "./channels/email.js";
+import { sendSms, sendSmsDev, validateSmsConfig } from "./channels/sms.js";
+import { sendWhatsApp, sendWhatsAppDev, validateWhatsAppConfig } from "./channels/whatsapp.js";
 
 const app = express();
 const server = createServer(app);
@@ -44,6 +50,8 @@ app.use(express.static("client/dist"));
 
 // Store active socket connections (for real-time features)
 const activeConnections = new Map(); // socketId -> { roomId, username }
+// Map username -> Set of socketIds (so we can notify room creator even when not in room)
+const usernameToSockets = new Map();
 
 // API Routes
 app.get("/api/health", (req, res) => {
@@ -227,6 +235,87 @@ app.post("/api/rooms/:roomId/invite", async (req, res) => {
   }
 });
 
+// ---------- Channels API (our own engine: Email, SMS, WhatsApp – no Twilio) ----------
+function getServerBaseUrl(req) {
+  return `${req.protocol}://${req.get("host")}`;
+}
+
+app.get("/api/channels/:channel", async (req, res) => {
+  try {
+    const { channel } = req.params;
+    if (!["email", "sms", "whatsapp"].includes(channel)) {
+      return res.status(400).json({ error: "Invalid channel" });
+    }
+    const data = await getChannelConfig(channel);
+    res.json(data || { config: {}, updatedAt: null });
+  } catch (err) {
+    console.error("Error fetching channel config:", err);
+    res.status(500).json({ error: "Failed to fetch config" });
+  }
+});
+
+app.put("/api/channels/:channel", async (req, res) => {
+  try {
+    const { channel } = req.params;
+    if (!["email", "sms", "whatsapp"].includes(channel)) {
+      return res.status(400).json({ error: "Invalid channel" });
+    }
+    const config = req.body || {};
+    await setChannelConfig(channel, config);
+    const data = await getChannelConfig(channel);
+    res.json(data);
+  } catch (err) {
+    console.error("Error saving channel config:", err);
+    res.status(500).json({ error: "Failed to save config" });
+  }
+});
+
+app.post("/api/channels/email/send", async (req, res) => {
+  try {
+    const { to, subject, text, html } = req.body || {};
+    if (!to) return res.status(400).json({ error: "to is required" });
+    const { config } = (await getChannelConfig("email")) || {};
+    const valid = validateEmailConfig(config);
+    if (!valid.valid) return res.status(400).json({ error: valid.error || "Email not configured" });
+    const result = await sendEmail(config, { to, subject, text, html });
+    await saveOutboundMessage("email", Array.isArray(to) ? to.join(",") : to, text || html || subject || "", "sent", result.messageId);
+    res.json({ success: true, messageId: result.messageId });
+  } catch (err) {
+    console.error("Error sending email:", err);
+    res.status(500).json({ error: err.message || "Failed to send email" });
+  }
+});
+
+app.post("/api/channels/sms/send", async (req, res) => {
+  try {
+    const { to, body } = req.body || {};
+    if (!to) return res.status(400).json({ error: "to is required" });
+    const { config } = (await getChannelConfig("sms")) || {};
+    const sendFn = config && config.gatewayUrl ? sendSms : sendSmsDev;
+    const result = await sendFn(config || {}, { to, body });
+    await saveOutboundMessage("sms", String(to), body || "", "sent", result.externalId);
+    res.json({ success: true, externalId: result.externalId });
+  } catch (err) {
+    console.error("Error sending SMS:", err);
+    res.status(500).json({ error: err.message || "Failed to send SMS" });
+  }
+});
+
+app.post("/api/channels/whatsapp/send", async (req, res) => {
+  try {
+    const { to, body } = req.body || {};
+    if (!to) return res.status(400).json({ error: "to is required" });
+    const { config } = (await getChannelConfig("whatsapp")) || {};
+    const sendFn = config && config.apiUrl ? sendWhatsApp : sendWhatsAppDev;
+    const result = await sendFn(config || {}, { to, body });
+    await saveOutboundMessage("whatsapp", String(to), body || "", "sent", result.externalId);
+    res.json({ success: true, externalId: result.externalId });
+  } catch (err) {
+    console.error("Error sending WhatsApp:", err);
+    res.status(500).json({ error: err.message || "Failed to send WhatsApp" });
+  }
+});
+
 // Frontend route handler for invite links
 app.get("/invite/:inviteToken", async (req, res) => {
   try {
@@ -249,6 +338,13 @@ app.get("/invite/:inviteToken", async (req, res) => {
 // Socket.IO Events
 io.on("connection", (socket) => {
   console.log("User connected:", socket.id);
+
+  socket.on("set-username", ({ username }) => {
+    if (!username || typeof username !== "string") return;
+    const u = username.trim();
+    if (!usernameToSockets.has(u)) usernameToSockets.set(u, new Set());
+    usernameToSockets.get(u).add(socket.id);
+  });
 
   socket.on("join-room", async ({ roomId, username }) => {
     try {
@@ -305,15 +401,23 @@ io.on("connection", (socket) => {
       }
       const requestId = await addPendingJoinRequest(room.id, username.trim(), socket.id);
       const creatorSocketId = await getCreatorSocketIdInRoom(room.id);
-      if (creatorSocketId) {
-        io.to(creatorSocketId).emit("join-request", {
-          requestId,
-          roomId: room.id,
-          roomName: room.name,
-          requesterUsername: username.trim(),
+      const creatorUsername = room.createdByUsername;
+      const targets = new Set();
+      if (creatorSocketId) targets.add(creatorSocketId);
+      if (creatorUsername && usernameToSockets.has(creatorUsername)) {
+        usernameToSockets.get(creatorUsername).forEach((id) => targets.add(id));
+      }
+      if (targets.size > 0) {
+        targets.forEach((sid) => {
+          io.to(sid).emit("join-request", {
+            requestId,
+            roomId: room.id,
+            roomName: room.name,
+            requesterUsername: username.trim(),
+          });
         });
       } else {
-        socket.emit("error", { message: "Room creator is not available to approve your request" });
+        socket.emit("error", { message: "Room creator is not available to approve your request. Ask them to open the app." });
         await deletePendingJoinRequest(requestId);
       }
     } catch (error) {
@@ -553,6 +657,10 @@ io.on("connection", (socket) => {
 
   socket.on("disconnect", async () => {
     try {
+      usernameToSockets.forEach((set, key) => {
+        set.delete(socket.id);
+        if (set.size === 0) usernameToSockets.delete(key);
+      });
       const connection = activeConnections.get(socket.id);
       if (connection) {
         const { roomId, username } = connection;

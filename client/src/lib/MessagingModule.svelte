@@ -48,6 +48,7 @@
     socket.on("connect", () => {
       isConnected = true;
       error = null;
+      if (config.username) socket.emit("set-username", { username: config.username });
       loadRooms();
       setupJoinRequestListeners();
     });
@@ -317,7 +318,7 @@
           </div>
         {:else if currentView === "integrations"}
           <div class="view-wrap view-integrations">
-            <Integrations onBack={handleBackToRooms} />
+            <Integrations {config} onBack={handleBackToRooms} />
           </div>
         {:else if currentView === "chat" && currentRoom}
           <div class="view-wrap view-chat">

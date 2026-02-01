@@ -122,6 +122,29 @@ export async function initDatabase() {
       `);
     }
 
+    const channelConfigExists = await db.get(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='channel_config'"
+    );
+    if (!channelConfigExists) {
+      await db.exec(`
+        CREATE TABLE channel_config (
+          channel TEXT PRIMARY KEY,
+          config_json TEXT,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE outbound_messages (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          channel TEXT NOT NULL,
+          recipient TEXT NOT NULL,
+          body TEXT NOT NULL,
+          status TEXT DEFAULT 'sent',
+          external_id TEXT,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX idx_outbound_channel ON outbound_messages (channel);
+      `);
+    }
+
     console.log("✅ Database initialized successfully");
     return db;
   } catch (error) {
@@ -432,6 +455,34 @@ export async function getRoomMessages(roomId, limit = 50) {
       timestamp: new Date(msg.timestamp),
     };
   });
+}
+
+// Channel config (email, sms, whatsapp - our own engine)
+export async function getChannelConfig(channel) {
+  const row = await db.get("SELECT config_json, updated_at FROM channel_config WHERE channel = ?", [channel]);
+  if (!row) return null;
+  try {
+    return { config: row.config_json ? JSON.parse(row.config_json) : {}, updatedAt: new Date(row.updated_at) };
+  } catch (_) {
+    return { config: {}, updatedAt: new Date(row.updated_at) };
+  }
+}
+
+export async function setChannelConfig(channel, config) {
+  const configJson = JSON.stringify(config || {});
+  await db.run(
+    "INSERT INTO channel_config (channel, config_json, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP) ON CONFLICT(channel) DO UPDATE SET config_json = excluded.config_json, updated_at = CURRENT_TIMESTAMP",
+    [channel, configJson]
+  );
+  return getChannelConfig(channel);
+}
+
+export async function saveOutboundMessage(channel, recipient, body, status = "sent", externalId = null) {
+  const result = await db.run(
+    "INSERT INTO outbound_messages (channel, recipient, body, status, external_id) VALUES (?, ?, ?, ?, ?)",
+    [channel, recipient, body, status, externalId]
+  );
+  return result.lastID;
 }
 
 // Utility function for UUID generation
