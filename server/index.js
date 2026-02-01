@@ -7,10 +7,12 @@ import multer from "multer";
 import path from "path";
 import fs from "fs";
 import { fileURLToPath } from "url";
+import { createRequire } from "module";
 import { v4 as uuidv4 } from "uuid";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const require = createRequire(import.meta.url);
 import {
   initDatabase,
   createRoom,
@@ -20,6 +22,8 @@ import {
   getAllRooms,
   getRoomsForUser,
   updateRoomInviteToken,
+  updateRoomMeta,
+  ensureRoomCreator,
   addUserToRoom,
   removeUserFromRoom,
   removeUserFromRoomByUsername,
@@ -44,6 +48,7 @@ import {
 import { sendEmail, validateEmailConfig } from "./channels/email.js";
 import { sendSms, sendSmsDev, validateSmsConfig } from "./channels/sms.js";
 import { sendWhatsApp, sendWhatsAppDev, validateWhatsAppConfig } from "./channels/whatsapp.js";
+import { GoogleGenAI } from "@google/genai";
 
 const app = express();
 const server = createServer(app);
@@ -247,6 +252,24 @@ app.get("/api/rooms/:roomId", async (req, res) => {
   }
 });
 
+app.patch("/api/rooms/:roomId/meta", async (req, res) => {
+  try {
+    const { roomId } = req.params;
+    const { assignedTo, lifecycleStage, teamName, channelType } = req.body || {};
+    const room = await updateRoomMeta(roomId, {
+      assignedTo: assignedTo != null ? String(assignedTo).trim() || null : undefined,
+      lifecycleStage: lifecycleStage != null ? String(lifecycleStage).trim() || null : undefined,
+      teamName: teamName != null ? String(teamName).trim() || null : undefined,
+      channelType: channelType != null ? String(channelType).trim() || "chat" : undefined,
+    });
+    if (!room) return res.status(404).json({ error: "Room not found" });
+    res.json(room);
+  } catch (error) {
+    console.error("Error updating room meta:", error);
+    res.status(500).json({ error: "Failed to update room meta" });
+  }
+});
+
 app.get("/api/rooms/:roomId/messages", async (req, res) => {
   try {
     const { roomId } = req.params;
@@ -259,6 +282,136 @@ app.get("/api/rooms/:roomId/messages", async (req, res) => {
   } catch (error) {
     console.error("Error fetching room messages:", error);
     res.status(500).json({ error: "Failed to fetch messages" });
+  }
+});
+
+// AI reply: use Gemini (key from .env) to generate a reply from recent conversation + optional workflow context
+app.post("/api/ai/reply", async (req, res) => {
+  try {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey || !apiKey.trim()) {
+      return res.status(503).json({ error: "AI not configured. Add GEMINI_API_KEY to .env." });
+    }
+    const { roomId, workflowContext } = req.body;
+    if (!roomId) {
+      return res.status(400).json({ error: "roomId required" });
+    }
+    const room = await getRoomById(roomId);
+    if (!room) {
+      return res.status(404).json({ error: "Room not found" });
+    }
+    const messages = await getRoomMessages(roomId, 25);
+    const convoText = messages
+      .filter((m) => m.message && String(m.message).trim())
+      .map((m) => `${m.username}: ${String(m.message).trim()}`)
+      .join("\n");
+    const product = workflowContext?.product?.trim() || "";
+    const kpis = workflowContext?.kpis?.trim() || "";
+    const instructions = workflowContext?.instructions?.trim() || "";
+    let systemPrompt =
+      "You are a helpful agent replying in a conversation. Reply in 1–3 short sentences. Be professional and relevant to the last message.";
+    if (product || kpis || instructions) {
+      const parts = [];
+      if (product) parts.push(`Product/service: ${product}`);
+      if (kpis) parts.push(`KPIs/goals: ${kpis}`);
+      if (instructions) parts.push(`Agent instructions: ${instructions}`);
+      systemPrompt =
+        "You are an agent trained for this workflow. Follow these guidelines:\n" +
+        parts.join("\n") +
+        "\n\nReply in 1–3 short sentences. Be professional and relevant to the last message.";
+    }
+    const fullPrompt = `${systemPrompt}\n\nRecent conversation:\n${convoText || "(no messages yet)"}\n\nGenerate only the agent reply (no prefix, no quotes):`;
+    const ai = new GoogleGenAI({ apiKey });
+    const response = await ai.models.generateContent({
+      model: "gemini-2.0-flash",
+      contents: fullPrompt,
+    });
+    let reply = "";
+    if (response?.text) {
+      reply = String(response.text).trim();
+    } else if (response?.candidates?.[0]?.content?.parts?.[0]?.text) {
+      reply = String(response.candidates[0].content.parts[0].text).trim();
+    }
+    if (!reply) {
+      return res.status(502).json({ error: "AI returned no reply." });
+    }
+    res.json({ reply });
+  } catch (error) {
+    console.error("Error generating AI reply:", error);
+    res.status(500).json({
+      error: error.message || "Failed to generate reply",
+    });
+  }
+});
+
+// Fetch URL and return extracted text (for workflow "Add from website")
+app.post("/api/ai/fetch-url", async (req, res) => {
+  try {
+    const { url } = req.body;
+    if (!url || typeof url !== "string") {
+      return res.status(400).json({ error: "url required" });
+    }
+    const trimmed = url.trim();
+    if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
+      return res.status(400).json({ error: "Invalid URL" });
+    }
+    const response = await fetch(trimmed, {
+      headers: { "User-Agent": "Nego/1.0 (workflow training)" },
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!response.ok) {
+      return res.status(502).json({ error: `URL returned ${response.status}` });
+    }
+    const html = await response.text();
+    const text = html
+      .replace(/<script[\s\S]*?<\/script>/gi, "")
+      .replace(/<style[\s\S]*?<\/style>/gi, "")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!text) {
+      return res.status(502).json({ error: "No text content extracted" });
+    }
+    res.json({ text: text.slice(0, 100000) });
+  } catch (error) {
+    console.error("Error fetching URL:", error);
+    res.status(500).json({ error: error.message || "Failed to fetch URL" });
+  }
+});
+
+// Upload document and return extracted text (for workflow training)
+app.post("/api/ai/upload-document", upload.single("file"), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: "file required" });
+    }
+    const ext = (path.extname(req.file.originalname) || "").toLowerCase();
+    const filePath = req.file.path;
+    let text = "";
+    if (ext === ".txt") {
+      text = await fs.promises.readFile(filePath, "utf-8");
+    } else if (ext === ".pdf") {
+      try {
+        const pdfParse = require("pdf-parse");
+        const dataBuffer = await fs.promises.readFile(filePath);
+        const data = await pdfParse(dataBuffer);
+        text = data.text || "";
+      } catch (pdfErr) {
+        await fs.promises.unlink(filePath).catch(() => {});
+        return res.status(400).json({ error: "PDF parsing failed. Try a .txt file or use a .txt document." });
+      }
+    } else {
+      await fs.promises.unlink(filePath).catch(() => {});
+      return res.status(400).json({ error: "Unsupported format. Use .txt or .pdf" });
+    }
+    await fs.promises.unlink(filePath).catch(() => {});
+    if (!text.trim()) {
+      return res.status(400).json({ error: "No text content in document" });
+    }
+    res.json({ text: text.slice(0, 100000) });
+  } catch (error) {
+    console.error("Error uploading document:", error);
+    res.status(500).json({ error: error.message || "Failed to process document" });
   }
 });
 
@@ -678,6 +831,9 @@ io.on("connection", (socket) => {
 
       const existingUser = await getUserBySocketId(socket.id);
       const alreadyInRoom = existingUser && existingUser.room_id === roomId;
+
+      // So the room always shows up for the creator after reconnect (getRoomsForUser uses created_by_username)
+      await ensureRoomCreator(roomId, username);
 
       if (!alreadyInRoom) {
         await addUserToRoom(roomId, socket.id, username);

@@ -181,6 +181,24 @@ export async function initDatabase() {
       `);
     }
 
+    // Inbox/conversation meta columns on rooms
+    const roomsCols = await db.all("PRAGMA table_info(rooms)");
+    const colNames = (roomsCols || []).map((c) => c.name);
+    const inboxCols = [
+      { name: "assigned_to_username", type: "TEXT" },
+      { name: "lifecycle_stage", type: "TEXT" },
+      { name: "team_name", type: "TEXT" },
+      { name: "channel_type", type: "TEXT DEFAULT 'chat'" },
+      { name: "last_message_at", type: "DATETIME" },
+      { name: "last_message_from_username", type: "TEXT" },
+      { name: "last_message_preview", type: "TEXT" },
+    ];
+    for (const { name, type } of inboxCols) {
+      if (!colNames.includes(name)) {
+        await db.run(`ALTER TABLE rooms ADD COLUMN ${name} ${type}`);
+      }
+    }
+
     console.log("✅ Database initialized successfully");
     return db;
   } catch (error) {
@@ -290,6 +308,13 @@ export async function getRoomById(roomId) {
     inviteLink: `${process.env.SERVER_URL || "http://localhost:3000"}/invite/${
       room.invite_token
     }`,
+    assignedTo: room.assigned_to_username ?? null,
+    lifecycleStage: room.lifecycle_stage ?? null,
+    teamName: room.team_name ?? null,
+    channelType: room.channel_type ?? "chat",
+    lastMessageAt: room.last_message_at ? new Date(room.last_message_at) : null,
+    lastMessageFromUsername: room.last_message_from_username ?? null,
+    lastMessagePreview: room.last_message_preview ?? null,
   };
 }
 
@@ -328,6 +353,13 @@ async function roomsWithCounts(roomRows) {
         inviteLink: `${
           process.env.SERVER_URL || "http://localhost:3000"
         }/invite/${room.invite_token}`,
+        assignedTo: room.assigned_to_username ?? null,
+        lifecycleStage: room.lifecycle_stage ?? null,
+        teamName: room.team_name ?? null,
+        channelType: room.channel_type ?? "chat",
+        lastMessageAt: room.last_message_at ? new Date(room.last_message_at) : null,
+        lastMessageFromUsername: room.last_message_from_username ?? null,
+        lastMessagePreview: room.last_message_preview ?? null,
       };
     })
   );
@@ -371,6 +403,15 @@ export async function deleteRoom(roomId) {
 }
 
 // User operations
+/** If the room has no creator set, set it to this username (e.g. first joiner becomes creator). */
+export async function ensureRoomCreator(roomId, username) {
+  if (!roomId || !username?.trim()) return;
+  await db.run(
+    "UPDATE rooms SET created_by_username = ? WHERE id = ? AND (created_by_username IS NULL OR created_by_username = '')",
+    [username.trim(), roomId]
+  );
+}
+
 export async function addUserToRoom(roomId, socketId, username) {
   await db.run(
     "INSERT INTO room_users (room_id, socket_id, username) VALUES (?, ?, ?)",
@@ -384,18 +425,8 @@ export async function removeUserFromRoom(socketId) {
   ]);
   if (user) {
     await db.run("DELETE FROM room_users WHERE socket_id = ?", [socketId]);
-
-    // Check if room is empty
-    const remainingUsers = await db.get(
-      "SELECT COUNT(*) as count FROM room_users WHERE room_id = ?",
-      [user.room_id]
-    );
-    if (remainingUsers.count === 0) {
-      // Room is empty, delete it
-      await deleteRoom(user.room_id);
-      console.log(`🧹 Cleaned up empty room: ${user.room_id}`);
-    }
-
+    // Do not delete the room when the last user leaves — rooms persist in the DB
+    // until explicitly deleted (e.g. by creator). This ensures rooms are not lost on disconnect.
     return user;
   }
   return null;
@@ -478,10 +509,27 @@ export async function getPendingJoinRequestsForCreator(creatorUsername) {
 }
 
 // Message operations
+function lastMessagePreview(msg) {
+  if (typeof msg !== "string") return "";
+  try {
+    const p = JSON.parse(msg);
+    const t = p.message || p.text || p.body || msg;
+    return String(t).slice(0, 120);
+  } catch (_) {
+    return msg.slice(0, 120);
+  }
+}
+
 export async function saveMessage(roomId, username, message, replyToMessageId = null) {
   const result = await db.run(
     "INSERT INTO room_messages (room_id, username, message, reply_to_message_id) VALUES (?, ?, ?, ?)",
     [roomId, username, message, replyToMessageId]
+  );
+
+  const preview = lastMessagePreview(message);
+  await db.run(
+    `UPDATE rooms SET last_message_at = CURRENT_TIMESTAMP, last_message_from_username = ?, last_message_preview = ? WHERE id = ?`,
+    [username, preview || null, roomId]
   );
 
   return {
@@ -492,6 +540,35 @@ export async function saveMessage(roomId, username, message, replyToMessageId = 
     replyToMessageId: replyToMessageId ?? undefined,
     timestamp: new Date(),
   };
+}
+
+/** Update room inbox meta (assigned to, lifecycle, team, channel type). */
+export async function updateRoomMeta(roomId, { assignedTo, lifecycleStage, teamName, channelType }) {
+  const room = await db.get("SELECT id FROM rooms WHERE id = ?", [roomId]);
+  if (!room) return null;
+
+  const updates = [];
+  const values = [];
+  if (assignedTo !== undefined) {
+    updates.push("assigned_to_username = ?");
+    values.push(assignedTo === "" || assignedTo == null ? null : assignedTo);
+  }
+  if (lifecycleStage !== undefined) {
+    updates.push("lifecycle_stage = ?");
+    values.push(lifecycleStage === "" || lifecycleStage == null ? null : lifecycleStage);
+  }
+  if (teamName !== undefined) {
+    updates.push("team_name = ?");
+    values.push(teamName === "" || teamName == null ? null : teamName);
+  }
+  if (channelType !== undefined) {
+    updates.push("channel_type = ?");
+    values.push(channelType === "" || channelType == null ? "chat" : channelType);
+  }
+  if (updates.length === 0) return getRoomById(roomId);
+  values.push(roomId);
+  await db.run(`UPDATE rooms SET ${updates.join(", ")} WHERE id = ?`, values);
+  return getRoomById(roomId);
 }
 
 export async function getRoomMessages(roomId, limit = 50) {

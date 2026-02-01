@@ -5,6 +5,7 @@ const SOUND_KEY = 'soundEnabled';
 const ENTER_TO_SEND_KEY = 'enterToSend';
 const CUSTOM_SNIPPETS_KEY = 'customSnippets';
 const AVATAR_KEY = 'avatar';
+const GEMINI_API_KEY = 'nego_gemini_api_key';
 
 const ACCENT_VALUES = ['green', 'purple', 'blue', 'teal'];
 const CHAT_STYLE_VALUES = ['solid', 'transparent', 'minimal'];
@@ -147,6 +148,48 @@ export function addCustomSnippet({ name, body }) {
 
 export function removeCustomSnippet(id) {
   setCustomSnippets(getCustomSnippets().filter((s) => s.id !== id));
+}
+
+/** Gemini API key for workflows and AI (stored in localStorage; do not use for sensitive prod) */
+export function getGeminiApiKey() {
+  if (typeof localStorage === 'undefined') return '';
+  return localStorage.getItem(GEMINI_API_KEY) || '';
+}
+
+export function setGeminiApiKey(key) {
+  if (typeof localStorage === 'undefined') return;
+  localStorage.setItem(GEMINI_API_KEY, (key && typeof key === 'string' ? key.trim() : '') || '');
+}
+
+const WORKFLOW_CONFIG_PREFIX = 'nego_workflow_';
+
+/** Get saved workflow config for a template (sales-engineer, marketing-engineer, receptionist) */
+export function getWorkflowConfig(template) {
+  if (typeof localStorage === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem(WORKFLOW_CONFIG_PREFIX + template);
+    if (!raw) return null;
+    const o = JSON.parse(raw);
+    return o && typeof o === 'object' ? o : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+/** Save workflow config for a template. { product, kpis, instructions, websiteText, documentText } */
+export function setWorkflowConfig(template, data) {
+  if (typeof localStorage === 'undefined') return;
+  const payload =
+    data && typeof data === 'object'
+      ? {
+          product: String(data.product ?? '').trim(),
+          kpis: String(data.kpis ?? '').trim(),
+          instructions: String(data.instructions ?? '').trim(),
+          websiteText: String(data.websiteText ?? '').trim(),
+          documentText: String(data.documentText ?? '').trim(),
+        }
+      : { product: '', kpis: '', instructions: '', websiteText: '', documentText: '' };
+  localStorage.setItem(WORKFLOW_CONFIG_PREFIX + template, JSON.stringify(payload));
 }
 
 let audioCtx = null;

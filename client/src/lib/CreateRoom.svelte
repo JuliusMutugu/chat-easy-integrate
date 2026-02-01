@@ -39,7 +39,7 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ...formData,
-          createdBy: config.username || undefined,
+          createdBy: config.username && config.username.trim() ? config.username.trim() : "User",
         }),
       });
       if (response.ok) {

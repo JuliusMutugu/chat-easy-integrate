@@ -8,6 +8,11 @@
   export let config = {};
   export let room = {};
   export let onLeaveRoom = () => {};
+  /** Called after assigning/unassigning so parent can update currentRoom and rooms */
+  export let onRoomMetaChange = () => {};
+  /** When set, parent renders the message input bar; we use this for draft and expose send via getSendMessage */
+  export let messageDraft = undefined;
+  export let getSendMessage = undefined;
 
   let messages = [];
   let newMessage = "";
@@ -32,6 +37,8 @@
   let emojiShow = false;
   let emojiQuery = "";
   let showEmojiPicker = false;
+  let variableShow = false;
+  let variableQuery = "";
   let emailSending = false;
   let emailError = "";
   let greetingDismissed = false;
@@ -39,8 +46,10 @@
   let showCalculator = false;
   let showMembersList = false;
   let showInvitePanel = false;
+  let showAssignPanel = false;
   let inviteLinkValue = "";
   let inviteEmail = "";
+  let assignInProgress = false;
   let showPaymentPanel = false;
   let showSignPanel = false;
   let showRedlinePanel = false;
@@ -148,6 +157,28 @@
       emailError = e.message || "Network error";
     } finally {
       emailSending = false;
+    }
+  }
+
+  async function assignTo(username) {
+    if (assignInProgress || !config.serverUrl || !room.id) return;
+    assignInProgress = true;
+    showAssignPanel = false;
+    try {
+      const res = await fetch(`${config.serverUrl}/api/rooms/${room.id}/meta`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ assignedTo: username || null }),
+      });
+      if (!res.ok) return;
+      const updated = await res.json();
+      onRoomMetaChange(updated);
+      playSuccess();
+      showToast(username ? "Assigned to " + username + "." : "Unassigned.");
+    } catch (_) {
+      showToast("Failed to update assignment.");
+    } finally {
+      assignInProgress = false;
     }
   }
 
@@ -274,6 +305,9 @@
     if (socket) {
       joinRoom();
       setupSocketListeners();
+    }
+    if (typeof getSendMessage === "function") {
+      getSendMessage(sendMessage);
     }
   });
 
@@ -425,14 +459,15 @@
   }
 
   function sendMessage() {
-    if (!newMessage.trim() || !socket) return;
+    const text = (typeof messageDraft !== "undefined" && messageDraft != null ? messageDraft : newMessage).trim();
+    if (!text || !socket) return;
 
     const clientId = "c-" + Date.now() + "-" + Math.random().toString(36).slice(2, 9);
     const pending = {
       id: "pending-" + clientId,
       clientId,
       username: config.username,
-      message: newMessage.trim(),
+      message: text,
       type: "text",
       status: "pending",
       timestamp: new Date(),
@@ -440,7 +475,7 @@
     messages = [...messages, pending];
 
     const payload = {
-      message: newMessage.trim(),
+      message: text,
       type: "text",
       clientId,
     };
@@ -450,11 +485,16 @@
     socket.emit("send-message", payload);
 
     playClick();
-    newMessage = "";
+    if (typeof messageDraft !== "undefined" && messageDraft != null) {
+      messageDraft = "";
+    } else {
+      newMessage = "";
+    }
     replyingTo = null;
     mentionShow = false;
     snippetShow = false;
     emojiShow = false;
+    variableShow = false;
     showQuickReplies = false;
     showCustomSnippets = false;
   }
@@ -517,7 +557,16 @@
     mentionShow = false;
     snippetShow = false;
     emojiShow = false;
+    variableShow = false;
 
+    const lastDollar = text.lastIndexOf("$");
+    if (lastDollar !== -1 && (cursorPos === undefined || cursorPos >= lastDollar)) {
+      const afterDollar = text.slice(lastDollar + 1);
+      if (afterDollar.indexOf("\n") === -1 && !/^\s*\{\{/.test(afterDollar)) {
+        variableShow = true;
+        variableQuery = afterDollar.replace(/\{\{/g, "").replace(/\}\}/g, "").trim().toLowerCase();
+      }
+    }
     if (lastAt !== -1) {
       const afterAt = text.slice(lastAt + 1);
       if (!/\s/.test(afterAt) && (cursorPos === undefined || cursorPos >= lastAt)) {
@@ -596,6 +645,30 @@
         (e) => !emojiQuery || e.code.toLowerCase().startsWith(emojiQuery)
       ).slice(0, 8)
     : [];
+
+  const VARIABLE_OPTIONS = [
+    { key: "contact.name", template: "{{contact.name}}" },
+    { key: "contact.email", template: "{{contact.email}}" },
+    { key: "contact.phone", template: "{{contact.phone}}" },
+    { key: "room.name", template: "{{room.name}}" },
+    { key: "agent.name", template: "{{agent.name}}" },
+    { key: "date", template: "{{date}}" },
+    { key: "time", template: "{{time}}" },
+  ];
+
+  $: variableCandidates = variableShow
+    ? VARIABLE_OPTIONS.filter(
+        (v) => !variableQuery || v.key.toLowerCase().includes(variableQuery)
+      ).slice(0, 8)
+    : [];
+
+  function insertVariableAtDollar(template) {
+    const lastDollar = newMessage.lastIndexOf("$");
+    newMessage = newMessage.slice(0, lastDollar) + template + " ";
+    variableShow = false;
+    variableQuery = "";
+    playClick();
+  }
 
   function insertSnippetAtSlash(body) {
     const lastSlash = newMessage.lastIndexOf("/");
@@ -725,6 +798,10 @@
         showEmojiPicker = false;
         event.preventDefault();
       }
+      if (variableShow) {
+        variableShow = false;
+        event.preventDefault();
+      }
     }
   }
 
@@ -736,6 +813,7 @@
     if (mentionShow && mentionCandidates.length > 0 && isEnter) return;
     if (snippetShow && snippetCandidates.length > 0 && isEnter) return;
     if (emojiShow && emojiCandidates.length > 0 && isEnter) return;
+    if (variableShow && variableCandidates.length > 0 && isEnter) return;
 
     if (enterToSend) {
       if (isEnter && !event.shiftKey) {
@@ -886,6 +964,7 @@
     : { approve: 0, reject: 0 };
 </script>
 
+<svelte:window onclick={(e) => { if (showAssignPanel && !e.target.closest('.header-assign-wrap')) showAssignPanel = false; }} />
 <div class="chat-room chat-room-respondio">
   <header class="chat-header respondio-chat-header">
     <div class="header-left">
@@ -937,6 +1016,17 @@
       {#if room.createdByUsername === config.username}
         <button type="button" class="btn-invite-header" onclick={openInvitePanel} title="Invite" aria-label="Invite to room">Invite</button>
       {/if}
+      <div class="header-assign-wrap">
+        <button type="button" class="btn-assign-header" onclick={() => (showAssignPanel = !showAssignPanel)} title="Assign conversation" aria-expanded={showAssignPanel} aria-haspopup="true" aria-label="Assign to someone">Assign</button>
+        {#if showAssignPanel}
+          <div class="assign-dropdown" role="menu">
+            <button type="button" class="assign-dropdown-item" role="menuitem" disabled={assignInProgress} onclick={() => assignTo(config.username)}>Assign to me</button>
+            <button type="button" class="assign-dropdown-item" role="menuitem" disabled={assignInProgress} onclick={() => assignTo(null)}>Unassign</button>
+            <div class="assign-dropdown-divider"></div>
+            <div class="assign-dropdown-hint">Assign to a team member (team list coming soon)</div>
+          </div>
+        {/if}
+      </div>
       {#if !isNegotiationActive}
         <button type="button" class="btn-negotiate" onclick={() => (showNegotiationForm = !showNegotiationForm)}>Start negotiation</button>
       {:else}
@@ -1130,47 +1220,6 @@
     </div>
   {/if}
 
-  <div class="tools-bar">
-    <button
-      type="button"
-      class="btn-tool"
-      onclick={() => { showCalculator = false; showDealPanel = !showDealPanel; playClick(); }}
-      title="Current terms (price, qty, SLA)"
-      aria-pressed={showDealPanel}
-    >
-      Terms
-    </button>
-    <button
-      type="button"
-      class="btn-tool"
-      onclick={() => { showDealPanel = false; showCalculator = !showCalculator; playClick(); }}
-      title="Calculator"
-      aria-pressed={showCalculator}
-    >
-      Calculator
-    </button>
-    <input
-      type="file"
-      bind:this={fileInputEl}
-      onchange={onFileSelected}
-      accept=".pdf,.doc,.docx,.xls,.xlsx,.txt,.png,.jpg,.jpeg"
-      class="file-input-hidden"
-      aria-label="Upload document"
-    />
-    <button
-      type="button"
-      class="btn-tool"
-      onclick={() => fileInputEl?.click()}
-      title="Upload document"
-      disabled={uploadInProgress}
-    >
-      {uploadInProgress ? "Uploading…" : "Upload"}
-    </button>
-    <button type="button" class="btn-tool" onclick={() => { showPaymentPanel = true; playClick(); }} title="Request payment">Request payment</button>
-    <button type="button" class="btn-tool" onclick={openSignPanel} title="Add signature">Sign</button>
-    <button type="button" class="btn-tool" onclick={openInvoice} title="Generate invoice">Invoice</button>
-  </div>
-
   {#if showDealPanel}
     <div
       class="drawer-overlay"
@@ -1266,7 +1315,73 @@
     </div>
   {/if}
 
-  <div class="messages-wrap" bind:this={messagesContainer}>
+  <!-- Top: toolbar row (above messages) -->
+  <div class="input-toolbar-section">
+    {#if replyingTo}
+      <div class="replying-to-bar">
+        <span class="replying-to-label">Replying to {replyingTo.username}:</span>
+        <span class="replying-to-snippet">{replyingTo.snippet}</span>
+        <button type="button" class="replying-to-cancel" onclick={cancelReply} aria-label="Cancel reply">Cancel</button>
+      </div>
+    {/if}
+    <div class="input-toolbar-top">
+      <select class="input-channel-select" aria-label="Channel">
+        <option value="nego">Nego</option>
+        <option value="whatsapp">WhatsApp</option>
+      </select>
+      <button type="button" class="btn-toolbar" onclick={() => { showQuickReplies = false; showCustomSnippets = !showCustomSnippets; }} title="Snippets (or type /)" aria-expanded={showCustomSnippets} aria-haspopup="true">
+        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+        <span>Snippets</span>
+      </button>
+      <button type="button" class="btn-toolbar" onclick={() => { showEmojiPicker = !showEmojiPicker; playClick(); }} title="Emoji (or type :)" aria-expanded={showEmojiPicker}>
+        <span class="emoji-toolbar-icon">😊</span>
+        <span>Emoji</span>
+      </button>
+      <button type="button" class="btn-toolbar btn-toolbar-location" onclick={shareLocation} title="Share location">
+        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+        <span>Location</span>
+      </button>
+      <button type="button" class="btn-tool btn-tool-action" onclick={() => { showCalculator = false; showDealPanel = !showDealPanel; playClick(); }} title="Current terms (price, qty, SLA)" aria-pressed={showDealPanel}>Terms</button>
+      <button type="button" class="btn-tool btn-tool-action" onclick={() => { showDealPanel = false; showCalculator = !showCalculator; playClick(); }} title="Calculator" aria-pressed={showCalculator}>Calculator</button>
+      <button type="button" class="btn-tool btn-tool-action" onclick={() => fileInputEl?.click()} title="Documents" disabled={uploadInProgress}>{uploadInProgress ? "Uploading…" : "Documents"}</button>
+      <button type="button" class="btn-tool btn-tool-action" onclick={() => { showPaymentPanel = true; playClick(); }} title="Request payment">Payment</button>
+      <button type="button" class="btn-tool btn-tool-action" onclick={openSignPanel} title="Add signature">Sign</button>
+      <button type="button" class="btn-tool btn-tool-action" onclick={openInvoice} title="Generate invoice">Invoice</button>
+      <span class="input-toolbar-top-divider" aria-hidden="true"></span>
+      <span class="input-footer-label">AI</span>
+      <button type="button" class="btn-ai-assist" title="AI Assist" aria-label="AI Assist">AI Assist</button>
+      <button type="button" class="btn-summarize" title="Summarize" aria-label="Summarize">Summarize</button>
+    </div>
+    {#if showCustomSnippets}
+      <div class="quick-replies-dropdown input-dropdown-snippets" role="menu">
+        {#if getCustomSnippets().length > 0}
+          {#each getCustomSnippets() as s}
+            <button type="button" class="quick-reply-option" role="menuitem" onclick={() => insertCustomSnippet(s.body)}>
+              <span class="snippet-option-name">{s.name}</span>
+              {#if s.body.length > 40}<span class="snippet-option-preview">{s.body.slice(0, 40)}…</span>{/if}
+            </button>
+          {/each}
+        {/if}
+        <div class="snippet-quick-divider">Quick replies</div>
+        {#each QUICK_REPLIES as text}
+          <button type="button" class="quick-reply-option" role="menuitem" onclick={() => insertQuickReply(text)}>{text}</button>
+        {/each}
+        {#if getCustomSnippets().length === 0}
+          <div class="snippets-empty">Add custom snippets in Settings.</div>
+        {/if}
+      </div>
+    {/if}
+    {#if showEmojiPicker}
+      <div class="emoji-picker-grid" role="listbox">
+        {#each EMOJI_SHORTCODES as e}
+          <button type="button" class="emoji-picker-btn" role="option" aria-selected="false" onclick={() => insertEmojiFromPicker(e.char)} title={e.code}>{e.char}</button>
+        {/each}
+      </div>
+    {/if}
+  </div>
+
+  <div class="messages-wrap">
+    <div class="messages-scroll" bind:this={messagesContainer}>
     {#if room.description && !greetingDismissed}
       <div class="room-greeting">
         <p class="room-greeting-desc">{room.description}</p>
@@ -1457,86 +1572,18 @@
         </div>
       </div>
     {/if}
+    </div>
   </div>
 
-  <div class="input-area respondio-input-area">
-    {#if replyingTo}
-      <div class="replying-to-bar">
-        <span class="replying-to-label">Replying to {replyingTo.username}:</span>
-        <span class="replying-to-snippet">{replyingTo.snippet}</span>
-        <button type="button" class="replying-to-cancel" onclick={cancelReply} aria-label="Cancel reply">Cancel</button>
-      </div>
-    {/if}
-
-    <div class="input-toolbar">
-      <select class="input-channel-select" aria-label="Channel">
-        <option value="nego">Nego</option>
-        <option value="whatsapp">WhatsApp</option>
-      </select>
-      <div class="input-toolbar-group">
-        <button
-          type="button"
-          class="btn-toolbar"
-          onclick={() => { showQuickReplies = false; showCustomSnippets = !showCustomSnippets; }}
-          title="Snippets (or type /)"
-          aria-expanded={showCustomSnippets}
-          aria-haspopup="true"
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
-          <span>Snippets</span>
-        </button>
-        <button
-          type="button"
-          class="btn-toolbar"
-          onclick={() => { showEmojiPicker = !showEmojiPicker; playClick(); }}
-          title="Emoji (or type :)"
-          aria-expanded={showEmojiPicker}
-        >
-          <span class="emoji-toolbar-icon">😊</span>
-          <span>Emoji</span>
-        </button>
-        <button type="button" class="btn-toolbar btn-toolbar-location" onclick={shareLocation} title="Share location">
-          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
-          <span>Location</span>
-        </button>
-      </div>
-      <button type="button" class="btn-send" onclick={sendMessage} disabled={!newMessage.trim()}>Send</button>
-    </div>
-
-    {#if showCustomSnippets}
-      <div class="quick-replies-dropdown input-dropdown-snippets" role="menu">
-        {#if getCustomSnippets().length > 0}
-          {#each getCustomSnippets() as s}
-            <button type="button" class="quick-reply-option" role="menuitem" onclick={() => insertCustomSnippet(s.body)}>
-              <span class="snippet-option-name">{s.name}</span>
-              {#if s.body.length > 40}<span class="snippet-option-preview">{s.body.slice(0, 40)}…</span>{/if}
-            </button>
-          {/each}
-        {/if}
-        <div class="snippet-quick-divider">Quick replies</div>
-        {#each QUICK_REPLIES as text}
-          <button type="button" class="quick-reply-option" role="menuitem" onclick={() => insertQuickReply(text)}>{text}</button>
-        {/each}
-        {#if getCustomSnippets().length === 0}
-          <div class="snippets-empty">Add custom snippets in Settings.</div>
-        {/if}
-      </div>
-    {/if}
-
-    {#if showEmojiPicker}
-      <div class="emoji-picker-grid" role="listbox">
-        {#each EMOJI_SHORTCODES as e}
-          <button type="button" class="emoji-picker-btn" role="option" aria-selected="false" onclick={() => insertEmojiFromPicker(e.char)} title={e.code}>{e.char}</button>
-        {/each}
-      </div>
-    {/if}
-
-    <div class="input-row input-row-wrap">
+  <!-- Message input: only when parent does not provide it via getSendMessage -->
+  {#if typeof getSendMessage === "undefined" || !getSendMessage}
+  <div class="input-area respondio-input-area input-area-bottom chat-input-bar-fixed">
+    <div class="input-row input-row-bottom">
       <div class="input-with-mentions">
         <textarea
           bind:this={messageInputEl}
           bind:value={newMessage}
-          placeholder="Type your message… @mention, /snippet, :emoji"
+          placeholder="Type your message…"
           rows="1"
           oninput={handleMessageInput}
           onkeydown={handleInputKeydown}
@@ -1569,22 +1616,68 @@
             {/each}
           </div>
         {/if}
+        {#if variableShow && variableCandidates.length > 0}
+          <div class="mention-dropdown variable-dropdown" role="listbox">
+            {#each variableCandidates as v}
+              <button type="button" class="mention-option" role="option" aria-selected="false" onclick={() => insertVariableAtDollar(v.template)} title={v.key}>
+                <span class="variable-key">{v.key}</span>
+                <span class="variable-template">{v.template}</span>
+              </button>
+            {/each}
+          </div>
+        {/if}
       </div>
-    </div>
-
-    <div class="input-respondio-footer">
-      <span class="input-footer-label">AI</span>
-      <button type="button" class="btn-ai-assist" title="AI Assist" aria-label="AI Assist">AI Assist</button>
-      <button type="button" class="btn-summarize" title="Summarize" aria-label="Summarize">Summarize</button>
+      <button type="button" class="btn-input-action" onclick={() => fileInputEl?.click()} title="Documents" aria-label="Upload document" disabled={uploadInProgress}>
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+      </button>
+      <button type="button" class="btn-input-action" onclick={() => { showEmojiPicker = !showEmojiPicker; playClick(); }} title="Emoji" aria-label="Emoji" aria-expanded={showEmojiPicker}>
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>
+      </button>
+      <button type="button" class="btn-input-action btn-ai-response" title="AI Response" aria-label="AI Response">
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/></svg>
+      </button>
+      <button type="button" class="btn-send" onclick={sendMessage} disabled={!newMessage.trim()}>Send</button>
     </div>
   </div>
+  {/if}
 </div>
 
 <style>
   .chat-room {
     height: 100%;
+    min-height: 0;
+    display: grid;
+    grid-template-rows: auto auto minmax(0, 1fr);
+    overflow: hidden;
+    position: relative;
+  }
+
+  .chat-room .chat-header {
+    grid-row: 1;
+  }
+
+  .chat-room .input-toolbar-section {
+    grid-row: 2;
+  }
+
+  .chat-room .messages-wrap {
+    grid-row: 3;
     display: flex;
     flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .chat-room .messages-scroll {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 1.25rem;
+    padding-bottom: 6rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
   }
 
   .chat-header {
@@ -1781,6 +1874,80 @@
   .btn-invite-header:hover {
     background: var(--navy-800);
     transform: translateY(-1px);
+  }
+
+  .header-assign-wrap {
+    position: relative;
+  }
+
+  .btn-assign-header {
+    background: var(--gray-100);
+    color: var(--gray-800);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.5rem 1rem;
+    cursor: pointer;
+    font-weight: 500;
+    font-size: 0.875rem;
+    font-family: inherit;
+    transition: background-color 0.15s ease, border-color 0.15s ease;
+  }
+
+  .btn-assign-header:hover {
+    background: var(--gray-200);
+    border-color: var(--gray-400);
+  }
+
+  .assign-dropdown {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    margin-top: 0.35rem;
+    min-width: 200px;
+    padding: 0.35rem;
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+    z-index: 100;
+  }
+
+  .assign-dropdown-item {
+    display: block;
+    width: 100%;
+    padding: 0.5rem 0.75rem;
+    border: none;
+    background: none;
+    color: var(--text-primary);
+    font-size: 0.875rem;
+    font-weight: 500;
+    font-family: inherit;
+    cursor: pointer;
+    border-radius: 6px;
+    text-align: left;
+    transition: background-color 0.15s ease;
+  }
+
+  .assign-dropdown-item:hover:not(:disabled) {
+    background: var(--gray-100);
+  }
+
+  .assign-dropdown-item:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  .assign-dropdown-divider {
+    height: 1px;
+    background: var(--border);
+    margin: 0.35rem 0;
+  }
+
+  .assign-dropdown-hint {
+    padding: 0.5rem 0.75rem;
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    line-height: 1.4;
   }
 
   .btn-negotiate {
@@ -2006,16 +2173,136 @@
     font-weight: 600;
   }
 
-  .tools-bar {
+  .input-toolbar-top {
     flex-shrink: 0;
     display: flex;
+    align-items: center;
     gap: 0.5rem;
-    padding: 0.5rem 1rem;
-    border-bottom: 1px solid var(--border);
-    background: var(--bg-secondary);
+    flex-wrap: wrap;
+    row-gap: 0.5rem;
   }
 
-  .btn-tool {
+  .input-toolbar-section .input-toolbar-top {
+    margin-bottom: 0;
+    padding-bottom: 0;
+    border-bottom: none;
+  }
+
+  .input-toolbar-top .input-channel-select,
+  .input-toolbar-top .btn-toolbar,
+  .input-toolbar-top .btn-tool,
+  .input-toolbar-top .btn-tool-action,
+  .input-toolbar-top .btn-ai-assist,
+  .input-toolbar-top .btn-summarize {
+    min-height: 36px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+  }
+
+  .input-toolbar-top .input-channel-select {
+    padding: 0 0.75rem;
+  }
+
+  .input-toolbar-top .btn-toolbar {
+    padding: 0 0.75rem;
+  }
+
+  .input-toolbar-top .btn-tool,
+  .input-toolbar-top .btn-tool-action {
+    padding: 0 0.875rem;
+  }
+
+  .input-toolbar-top-divider {
+    width: 1px;
+    height: 1.25rem;
+    background: var(--border);
+    margin: 0 0.25rem;
+    flex-shrink: 0;
+    align-self: center;
+  }
+
+  .input-toolbar-top .input-footer-label {
+    margin: 0;
+    margin-right: 0.25rem;
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    align-self: center;
+  }
+
+  .input-row-bottom {
+    display: flex;
+    align-items: flex-end;
+    gap: 0.5rem;
+    flex-shrink: 0;
+    margin-top: 0.25rem;
+  }
+
+  .input-row-bottom .input-with-mentions {
+    flex: 1;
+    min-width: 0;
+    min-height: 44px;
+  }
+
+  .input-row-bottom .input-with-mentions textarea {
+    min-height: 44px;
+    resize: none;
+    padding: 0.6rem 0.75rem;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    font-size: 0.9375rem;
+    line-height: 1.4;
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  .input-row-bottom .btn-input-action {
+    flex-shrink: 0;
+    align-self: flex-end;
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-family: inherit;
+    transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  }
+
+  .input-row-bottom .btn-input-action:hover {
+    background: var(--gray-100);
+    border-color: var(--gray-300);
+    color: var(--text-primary);
+  }
+
+  .input-row-bottom .btn-input-action.btn-ai-response {
+    color: var(--green-600);
+  }
+
+  .input-row-bottom .btn-input-action.btn-ai-response:hover {
+    background: var(--green-50);
+    border-color: var(--green-500);
+    color: var(--green-700);
+  }
+
+  .input-row-bottom .btn-send {
+    flex-shrink: 0;
+    align-self: flex-end;
+    min-height: 44px;
+    padding: 0.6rem 1.25rem;
+  }
+
+  .btn-tool,
+  .btn-tool-action {
     padding: 0.5rem 1rem;
     font-size: 0.875rem;
     font-weight: 500;
@@ -2433,13 +2720,8 @@
     text-decoration: underline;
   }
 
-  .messages-wrap {
-    flex: 1;
-    overflow-y: auto;
-    padding: 1.25rem;
-    display: flex;
-    flex-direction: column;
-    gap: 1rem;
+  .messages-scroll {
+    position: relative;
   }
 
   .message {
@@ -2557,13 +2839,18 @@
   }
 
   .system-msg {
-    background: var(--navy-100);
-    color: var(--navy-800);
-    padding: 0.5rem 1rem;
-    border-radius: 999px;
-    font-size: 0.8125rem;
+    background: transparent;
+    color: var(--gray-500);
+    padding: 0.5rem 0;
+    border-radius: 0;
+    font-size: 0.75rem;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin: 1rem 0;
     display: flex;
     align-items: center;
+    justify-content: center;
     gap: 0.5rem;
     flex-wrap: wrap;
   }
@@ -2644,18 +2931,33 @@
     transition: background-color var(--duration-normal) var(--ease-in-out);
   }
 
-  .input-toolbar {
+  .input-toolbar-section {
+    flex-shrink: 0;
+    padding: 0.75rem 1.25rem;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-secondary);
     display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    flex-wrap: wrap;
-    margin-bottom: 0.5rem;
+    flex-direction: column;
+    gap: 0.5rem;
   }
 
-  .input-toolbar-group {
+  .respondio-input-area.input-area-bottom {
+    min-height: 64px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    background: var(--bg-primary);
+    border-top: 1px solid var(--border);
+    flex-shrink: 0;
+    z-index: 2;
+  }
+
+  .input-toolbar,
+  .input-toolbar-row {
     display: flex;
     align-items: center;
-    gap: 0.35rem;
+    gap: 0.5rem;
+    flex-wrap: wrap;
   }
 
   .btn-toolbar {
@@ -2794,6 +3096,19 @@
   .emoji-code {
     font-size: 0.75rem;
     color: var(--text-secondary);
+  }
+
+  .variable-dropdown .variable-key {
+    display: block;
+    font-weight: 600;
+    color: var(--navy-800);
+  }
+
+  .variable-dropdown .variable-template {
+    display: block;
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    margin-top: 0.125rem;
   }
 
   .input-respondio-footer {
@@ -3247,7 +3562,7 @@
       max-width: 90%;
     }
 
-    .messages-wrap {
+    .messages-scroll {
       padding: 1rem;
     }
 

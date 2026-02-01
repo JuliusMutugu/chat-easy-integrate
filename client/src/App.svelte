@@ -4,6 +4,18 @@
   import { toggleTheme, getTheme, playClick, playSuccess, playOpen } from "./lib/theme.js";
 
   let showModule = false;
+  /** Paths that show the app (MessagingModule) instead of the landing page. Root / is always landing. */
+  function isAppPath(path) {
+    const p = (path || "").replace(/^\/+/, "");
+    if (!p) return false;
+    return p === "dashboard" || p === "workflows" || p.startsWith("workflows/") || p === "contacts" || p === "settings" || p === "integrations" || p === "create" || p === "pending" || p.startsWith("inbox");
+  }
+  function syncShowModuleFromUrl() {
+    showModule = isAppPath(typeof window !== "undefined" ? window.location.pathname : "");
+  }
+  function onPopState() {
+    syncShowModuleFromUrl();
+  }
   let config = {
     serverUrl: "http://localhost:3000",
     username: "User" + Math.floor(Math.random() * 1000),
@@ -109,6 +121,8 @@
 
   onMount(() => {
     darkMode = document.documentElement.getAttribute("data-theme") === "dark";
+    syncShowModuleFromUrl();
+    window.addEventListener("popstate", onPopState);
 
     const urlParams = new URLSearchParams(window.location.search);
     const roomId = urlParams.get("room");
@@ -142,6 +156,7 @@
     startAutoScrollTour();
 
     return () => {
+      window.removeEventListener("popstate", onPopState);
       sectionObserver?.disconnect();
       if (autoScrollRafId) cancelAnimationFrame(autoScrollRafId);
     };
@@ -162,13 +177,13 @@
         inviteRoom = await response.json();
         inviteToken = token;
         showModule = true;
+        window.history.replaceState({}, document.title, "/dashboard");
       } else {
         alert("Invalid or expired invitation link.");
       }
     } catch (error) {
       alert("Failed to load room from invitation link.");
     }
-    window.history.replaceState({}, document.title, window.location.pathname);
   }
 
   async function handleInviteLink(roomId) {
@@ -177,24 +192,30 @@
       if (response.ok) {
         inviteRoom = await response.json();
         showModule = true;
+        window.history.replaceState({}, document.title, "/dashboard");
       } else {
         alert("Invitation link is invalid or room no longer exists.");
       }
     } catch (error) {
       alert("Failed to load room from invitation link.");
     }
-    window.history.replaceState({}, document.title, window.location.pathname);
   }
 
   function toggleModule() {
     showModule = !showModule;
     inviteRoom = null;
     inviteToken = null;
-    if (showModule) playOpen();
-    else playClick();
+    if (showModule) {
+      window.history.pushState({}, document.title, "/dashboard");
+      playOpen();
+    } else {
+      window.history.pushState({}, document.title, "/");
+      playClick();
+    }
   }
 
   function handleClose() {
+    window.history.pushState({}, document.title, "/");
     showModule = false;
     inviteRoom = null;
     inviteToken = null;
@@ -216,6 +237,7 @@
         const room = await response.json();
         inviteRoom = room;
         showModule = true;
+        window.history.pushState({}, document.title, "/dashboard");
         quickJoinCode = "";
         playSuccess();
       } else {
@@ -1512,6 +1534,14 @@
       grid-template-columns: 1fr;
       gap: 3rem;
       text-align: center;
+    }
+
+    .hero-text {
+      order: 1;
+    }
+
+    .hero-visual {
+      order: 2;
     }
 
     .hero-pills {

@@ -1,6 +1,6 @@
 <script>
   import { onMount } from "svelte";
-  import { getEnterToSend, setEnterToSend, getCustomSnippets, addCustomSnippet, removeCustomSnippet, getThemePreference, setThemePreference, getAvatar, setAvatar, getAccent, setAccent, getChatStyle, setChatStyle } from "./theme.js";
+  import { getEnterToSend, setEnterToSend, getCustomSnippets, addCustomSnippet, removeCustomSnippet, getThemePreference, setThemePreference, getAvatar, setAvatar, getAccent, setAccent, getChatStyle, setChatStyle, getGeminiApiKey, setGeminiApiKey } from "./theme.js";
   import { playClick, playSuccess } from "./theme.js";
 
   export let onBack = () => {};
@@ -18,6 +18,9 @@
   let avatarChoice = "";
   let accentChoice = "green";
   let chatStyleChoice = "solid";
+  let geminiApiKey = "";
+  let geminiApiKeyMessage = "";
+  let geminiApiKeyError = "";
 
   onMount(() => {
     enterToSend = getEnterToSend();
@@ -26,7 +29,16 @@
     avatarChoice = getAvatar();
     accentChoice = getAccent();
     chatStyleChoice = getChatStyle();
+    geminiApiKey = getGeminiApiKey();
   });
+
+  function saveGeminiApiKey() {
+    geminiApiKeyMessage = "";
+    geminiApiKeyError = "";
+    setGeminiApiKey(geminiApiKey);
+    geminiApiKeyMessage = "Gemini API key saved. Workflows and AI suggestions will use it when configured.";
+    playSuccess();
+  }
 
   function chooseAvatar(value) {
     avatarChoice = value;
@@ -220,6 +232,27 @@
           </span>
           <span class="avatar-label">Female</span>
         </button>
+      </div>
+    </section>
+
+    <section class="settings-section" aria-labelledby="ai-api-heading">
+      <h3 id="ai-api-heading">AI &amp; API</h3>
+      <p class="setting-desc block">Configure Gemini for workflows and negotiation KPIs. Your key is stored locally in this browser.</p>
+      {#if geminiApiKeyMessage}<div class="banner success" role="status">{geminiApiKeyMessage}</div>{/if}
+      {#if geminiApiKeyError}<div class="banner err" role="alert">{geminiApiKeyError}</div>{/if}
+      <div class="api-key-row">
+        <label for="gemini-api-key" class="setting-name">Gemini API key</label>
+        <input
+          id="gemini-api-key"
+          type="password"
+          class="api-key-input"
+          placeholder="Enter your Gemini API key"
+          bind:value={geminiApiKey}
+          autocomplete="off"
+          aria-describedby="gemini-api-hint"
+        />
+        <span id="gemini-api-hint" class="setting-desc block">Get a key from <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer" class="settings-link">Google AI Studio</a>.</span>
+        <button type="button" class="btn-save" onclick={saveGeminiApiKey}>Save API key</button>
       </div>
     </section>
 
@@ -723,5 +756,37 @@
     font-family: inherit;
     background: var(--input-bg);
     color: var(--text-primary);
+  }
+
+  .api-key-row {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+  }
+
+  .api-key-input {
+    max-width: 400px;
+    padding: 0.5rem 0.75rem;
+    border: 2px solid var(--border);
+    border-radius: 8px;
+    font-size: 0.875rem;
+    font-family: inherit;
+    background: var(--input-bg);
+    color: var(--text-primary);
+  }
+
+  .api-key-input:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+
+  .settings-link {
+    color: var(--accent);
+    text-decoration: none;
+  }
+
+  .settings-link:hover {
+    text-decoration: underline;
   }
 </style>
