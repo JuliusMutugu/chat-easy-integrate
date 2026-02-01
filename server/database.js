@@ -1,6 +1,7 @@
 import sqlite3 from "sqlite3";
 import { open } from "sqlite";
 import path from "path";
+import crypto from "crypto";
 import { fileURLToPath } from "url";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -241,6 +242,18 @@ export async function initDatabase() {
       );
       CREATE INDEX IF NOT EXISTS idx_kyc_user ON kyc_verifications (user_id);
       CREATE INDEX IF NOT EXISTS idx_kyc_status ON kyc_verifications (status);
+
+      CREATE TABLE IF NOT EXISTS widget_config (
+        id TEXT PRIMARY KEY,
+        room_id TEXT NOT NULL,
+        token TEXT UNIQUE NOT NULL,
+        allowed_origins TEXT,
+        created_by_user_id TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (room_id) REFERENCES rooms (id) ON DELETE CASCADE
+      );
+      CREATE INDEX IF NOT EXISTS idx_widget_token ON widget_config (token);
+      CREATE INDEX IF NOT EXISTS idx_widget_room ON widget_config (room_id);
     `);
 
     console.log("✅ Database initialized successfully");
@@ -749,6 +762,54 @@ export async function updateKycStatus(kycId, status, reviewerNotes = null) {
   if (kyc) {
     await updateUserKycStatus(kyc.user_id, status);
   }
+}
+
+/** Widget SDK – embeddable chat widget config */
+function generateWidgetId() {
+  return "wg-" + Date.now() + "-" + Math.random().toString(36).slice(2, 11);
+}
+
+function generateWidgetToken() {
+  return "nego_" + crypto.randomBytes(24).toString("hex");
+}
+
+export async function createWidgetConfig(roomId, createdByUserId, allowedOrigins = "*") {
+  const id = generateWidgetId();
+  const token = generateWidgetToken();
+  const origins = typeof allowedOrigins === "string" ? allowedOrigins : (Array.isArray(allowedOrigins) ? allowedOrigins.join(",") : "*");
+  await db.run(
+    "INSERT INTO widget_config (id, room_id, token, allowed_origins, created_by_user_id) VALUES (?, ?, ?, ?, ?)",
+    [id, roomId, token, origins, createdByUserId || null]
+  );
+  return getWidgetConfigById(id);
+}
+
+export async function getWidgetConfigById(id) {
+  const row = await db.get("SELECT * FROM widget_config WHERE id = ?", [id]);
+  return row ? { id: row.id, roomId: row.room_id, token: row.token, allowedOrigins: row.allowed_origins || "*", createdAt: row.created_at } : null;
+}
+
+export async function getWidgetConfigByToken(token) {
+  const row = await db.get("SELECT * FROM widget_config WHERE token = ?", [token]);
+  if (!row) return null;
+  const room = await getRoomById(row.room_id);
+  if (!room) return null;
+  return {
+    id: row.id,
+    roomId: row.room_id,
+    token: row.token,
+    allowedOrigins: row.allowed_origins || "*",
+    room: { id: room.id, name: room.name, description: room.description, code: room.code },
+  };
+}
+
+export async function getWidgetConfigsForRoom(roomId) {
+  const rows = await db.all("SELECT * FROM widget_config WHERE room_id = ? ORDER BY created_at DESC", [roomId]);
+  return rows.map((r) => ({ id: r.id, roomId: r.room_id, token: r.token, allowedOrigins: r.allowed_origins || "*", createdAt: r.created_at }));
+}
+
+export async function deleteWidgetConfig(id) {
+  await db.run("DELETE FROM widget_config WHERE id = ?", [id]);
 }
 
 export async function getRoomMessages(roomId, limit = 50) {

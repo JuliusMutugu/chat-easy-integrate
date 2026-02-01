@@ -55,6 +55,10 @@ import {
   submitKyc,
   getKycByUserId,
   updateKycStatus,
+  createWidgetConfig,
+  getWidgetConfigByToken,
+  getWidgetConfigsForRoom,
+  deleteWidgetConfig,
 } from "./database.js";
 import { sendEmail, validateEmailConfig } from "./channels/email.js";
 import { sendSmsWithConfig, validateSmsConfig } from "./channels/sms.js";
@@ -109,6 +113,12 @@ const storage = multer.diskStorage({
   },
 });
 const upload = multer({ storage, limits: { fileSize: 15 * 1024 * 1024 } }); // 15 MB
+
+// Serve SDK (embeddable widget script)
+const sdkDir = path.join(__dirname, "sdk");
+if (fs.existsSync(sdkDir)) {
+  app.use("/sdk", express.static(sdkDir));
+}
 
 // Serve uploaded files (before client dist so /uploads works)
 app.use("/uploads", express.static(uploadsDir));
@@ -1116,6 +1126,70 @@ app.post("/api/channels/whatsapp/send", async (req, res) => {
   }
 });
 
+// Widget SDK – public init (no auth) for embedded widget
+app.get("/api/widget/init", async (req, res) => {
+  try {
+    const token = req.query.token;
+    if (!token || typeof token !== "string") {
+      return res.status(400).json({ error: "token required" });
+    }
+    const config = await getWidgetConfigByToken(token.trim());
+    if (!config) {
+      return res.status(404).json({ error: "Invalid or expired widget token" });
+    }
+    res.json({ roomId: config.roomId, roomName: config.room.name, serverUrl: `${req.protocol}://${req.get("host")}` });
+  } catch (err) {
+    console.error("Widget init error:", err);
+    res.status(500).json({ error: "Failed to load widget" });
+  }
+});
+
+// Widget SDK – create widget (auth required)
+app.post("/api/widget/create", requireAuth, async (req, res) => {
+  try {
+    const { roomId, allowedOrigins = "*" } = req.body;
+    if (!roomId) {
+      return res.status(400).json({ error: "roomId required" });
+    }
+    const room = await getRoomById(roomId);
+    if (!room) {
+      return res.status(404).json({ error: "Room not found" });
+    }
+    const config = await createWidgetConfig(roomId, req.session.userId, allowedOrigins);
+    const serverUrl = `${req.protocol}://${req.get("host")}`;
+    const embedCode = `<script src="${serverUrl}/sdk/nego.js" data-nego-token="${config.token}" data-nego-url="${serverUrl}"></script>`;
+    res.json({ ...config, embedCode });
+  } catch (err) {
+    console.error("Widget create error:", err);
+    res.status(500).json({ error: err.message || "Failed to create widget" });
+  }
+});
+
+// Widget SDK – list widgets for room
+app.get("/api/widget/list/:roomId", requireAuth, async (req, res) => {
+  try {
+    const { roomId } = req.params;
+    const configs = await getWidgetConfigsForRoom(roomId);
+    const serverUrl = `${req.protocol}://${req.get("host")}`;
+    const list = configs.map((c) => ({ ...c, embedCode: `<script src="${serverUrl}/sdk/nego.js" data-nego-token="${c.token}" data-nego-url="${serverUrl}"></script>` }));
+    res.json({ widgets: list });
+  } catch (err) {
+    console.error("Widget list error:", err);
+    res.status(500).json({ error: err.message || "Failed to list widgets" });
+  }
+});
+
+// Widget SDK – delete widget
+app.delete("/api/widget/:id", requireAuth, async (req, res) => {
+  try {
+    await deleteWidgetConfig(req.params.id);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("Widget delete error:", err);
+    res.status(500).json({ error: err.message || "Failed to delete widget" });
+  }
+});
+
 // Frontend route handler for invite links
 app.get("/invite/:inviteToken", async (req, res) => {
   try {
@@ -1138,25 +1212,35 @@ app.get("/invite/:inviteToken", async (req, res) => {
 // Socket.IO Events
 io.on("connection", async (socket) => {
   console.log("User connected:", socket.id);
-  
-  // Check authentication
-  const userId = socket.request.session?.userId;
-  if (!userId) {
-    console.log("Unauthenticated socket connection:", socket.id);
-    socket.emit("error", { message: "Not authenticated. Please log in." });
-    socket.disconnect();
-    return;
+  const query = socket.handshake.query || {};
+
+  // Widget SDK: allow connection with valid widget token (no session required)
+  let isWidget = false;
+  if (query.widgetToken && query.roomId) {
+    const config = await getWidgetConfigByToken(String(query.widgetToken).trim());
+    if (config && config.roomId === query.roomId) {
+      isWidget = true;
+      console.log("Widget connection:", socket.id, config.roomId);
+    }
   }
-  
-  const user = await getUserById(userId);
-  if (!user) {
-    console.log("Invalid user for socket:", socket.id);
-    socket.emit("error", { message: "User not found" });
-    socket.disconnect();
-    return;
+
+  if (!isWidget) {
+    const userId = socket.request.session?.userId;
+    if (!userId) {
+      console.log("Unauthenticated socket connection:", socket.id);
+      socket.emit("error", { message: "Not authenticated. Please log in." });
+      socket.disconnect();
+      return;
+    }
+    const user = await getUserById(userId);
+    if (!user) {
+      console.log("Invalid user for socket:", socket.id);
+      socket.emit("error", { message: "User not found" });
+      socket.disconnect();
+      return;
+    }
+    console.log("Authenticated user connected:", user.email, socket.id);
   }
-  
-  console.log("Authenticated user connected:", user.email, socket.id);
 
   socket.on("set-username", ({ username }) => {
     if (!username || typeof username !== "string") return;

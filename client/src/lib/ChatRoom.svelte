@@ -64,6 +64,53 @@
   let signLastY = 0;
   let fileInputEl;
   let uploadInProgress = false;
+  let widgetEmbedCode = "";
+  let widgetCreating = false;
+  let widgets = [];
+
+  async function createWidget() {
+    if (widgetCreating || !room.id) return;
+    widgetCreating = true;
+    try {
+      const res = await fetch(`${config.serverUrl}/api/widget/create`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ roomId: room.id, allowedOrigins: "*" }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to create widget");
+      widgetEmbedCode = data.embedCode || "";
+      widgets = [data, ...widgets];
+      playSuccess();
+    } catch (err) {
+      showToast(err.message || "Failed to create widget");
+    } finally {
+      widgetCreating = false;
+    }
+  }
+
+  async function loadWidgets() {
+    if (!room.id) return;
+    try {
+      const res = await fetch(`${config.serverUrl}/api/widget/list/${room.id}`, { credentials: "include" });
+      if (!res.ok) return;
+      const data = await res.json();
+      widgets = data.widgets || [];
+      if (widgets.length > 0 && !widgetEmbedCode) {
+        widgetEmbedCode = widgets[0].embedCode || "";
+      }
+    } catch (_) {}
+  }
+
+  function copyWidgetCode(code) {
+    const c = code || widgetEmbedCode;
+    if (!c) return;
+    navigator.clipboard.writeText(c).then(() => {
+      showToast("Embed code copied.");
+      playSuccess();
+    });
+  }
 
   async function ensureInviteLink() {
     if (room.inviteToken) {
@@ -87,6 +134,7 @@
 
   async function openInvitePanel() {
     showInvitePanel = true;
+    loadWidgets();
     inviteLinkValue = "";
     await ensureInviteLink();
     playClick();
@@ -1188,6 +1236,22 @@
                 Twitter
               </button>
             </div>
+          </section>
+
+          <section class="invite-section-block">
+            <h4 class="invite-section-title">Embed widget</h4>
+            <p class="invite-hint small">Add a chat widget to your website. Visitors can chat directly from your site.</p>
+            {#if widgets.length === 0}
+              <button type="button" class="btn-create-widget" onclick={createWidget} disabled={widgetCreating}>
+                {widgetCreating ? "Creating…" : "Create embed code"}
+              </button>
+            {:else}
+              <div class="invite-embed-row">
+                <textarea readonly class="invite-embed-textarea" rows="3">{widgetEmbedCode}</textarea>
+                <button type="button" class="btn-copy" onclick={() => copyWidgetCode(widgetEmbedCode)}>Copy code</button>
+              </div>
+              <p class="invite-embed-hint">Paste this script into your website's HTML before &lt;/body&gt;</p>
+            {/if}
           </section>
 
           <section class="invite-section-block">
@@ -2296,6 +2360,52 @@
 
   .btn-copy-email {
     flex-shrink: 0;
+  }
+
+  .btn-create-widget {
+    padding: 0.625rem 1rem;
+    font-size: 0.9375rem;
+    font-weight: 600;
+    font-family: inherit;
+    background: var(--green-600);
+    color: var(--white);
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+  }
+
+  .btn-create-widget:hover:not(:disabled) {
+    background: var(--green-700);
+  }
+
+  .btn-create-widget:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  .invite-embed-row {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .invite-embed-textarea {
+    width: 100%;
+    padding: 0.625rem 0.75rem;
+    font-size: 0.75rem;
+    font-family: monospace;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    resize: vertical;
+    min-height: 4rem;
+    background: var(--gray-50);
+  }
+
+  .invite-embed-hint {
+    margin: 0.5rem 0 0;
+    font-size: 0.8125rem;
+    color: var(--text-secondary);
   }
 
   .invite-share-row {
