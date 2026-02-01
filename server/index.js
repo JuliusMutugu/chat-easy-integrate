@@ -4,6 +4,7 @@ import { createServer } from "http";
 import { Server } from "socket.io";
 import cors from "cors";
 import session from "express-session";
+import connectSqlite3 from "connect-sqlite3";
 import bcrypt from "bcrypt";
 import multer from "multer";
 import path from "path";
@@ -83,7 +84,14 @@ const app = express();
 const server = createServer(app);
 
 // Session store for socket.io to share sessions with Express
+// Use SQLite for session storage in production (persistent sessions)
+const SQLiteStore = connectSqlite3(session);
+
 const sessionMiddleware = session({
+  store: new SQLiteStore({
+    db: process.env.DATABASE_PATH || "./server/messaging.db",
+    table: "sessions",
+  }),
   secret: process.env.SESSION_SECRET || "nego-secret-change-in-production",
   resave: false,
   saveUninitialized: false,

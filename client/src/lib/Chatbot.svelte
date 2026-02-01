@@ -12,10 +12,10 @@
   let error = "";
 
   async function sendMessage() {
-    const text = input.trim();
-    if (!text || loading) return;
+    const userText = input.trim();
+    if (!userText || loading) return;
 
-    messages = [...messages, { role: "user", content: text }];
+    messages = [...messages, { role: "user", content: userText }];
     input = "";
     loading = true;
     error = "";
@@ -26,11 +26,11 @@
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ message: text, history }),
+        body: JSON.stringify({ message: userText, history }),
       });
 
-      const text = await res.text();
-      const data = (text?.trimStart().startsWith("{") ? (() => { try { return JSON.parse(text); } catch { return null; } })() : null) || {};
+      const responseText = await res.text();
+      const data = (responseText?.trimStart().startsWith("{") ? (() => { try { return JSON.parse(responseText); } catch { return null; } })() : null) || {};
       if (!res.ok) {
         error = data.error || "Failed to get response";
         messages = messages.slice(0, -1);
