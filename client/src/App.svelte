@@ -1,9 +1,12 @@
 <script>
   import { onMount } from "svelte";
   import MessagingModule from "./lib/MessagingModule.svelte";
+  import Auth from "./lib/Auth.svelte";
   import { toggleTheme, getTheme, playClick, playSuccess, playOpen } from "./lib/theme.js";
 
   let showModule = false;
+  let user = null;
+  let authChecked = false;
   /** Paths that show the app (MessagingModule) instead of the landing page. Root / is always landing. */
   function isAppPath(path) {
     const p = (path || "").replace(/^\/+/, "");
@@ -17,10 +20,34 @@
     syncShowModuleFromUrl();
   }
   let config = {
-    serverUrl: "http://localhost:3000",
+    serverUrl: import.meta.env.VITE_SERVER_URL || "http://localhost:3000",
     username: "User" + Math.floor(Math.random() * 1000),
     theme: "modern",
   };
+
+  async function checkAuth() {
+    try {
+      const res = await fetch(`${config.serverUrl}/api/auth/me`, {
+        credentials: "include",
+      });
+      if (res.ok) {
+        const data = await res.json();
+        user = data.user;
+        config.username = data.user.name;
+      }
+    } catch (err) {
+      console.error("Auth check failed:", err);
+    } finally {
+      authChecked = true;
+    }
+  }
+
+  function handleAuthSuccess(authenticatedUser) {
+    user = authenticatedUser;
+    config.username = authenticatedUser.name;
+    showModule = true;
+    window.history.pushState({}, "", "/dashboard");
+  }
   let inviteRoom = null;
   let inviteToken = null;
   let quickJoinCode = "";
@@ -119,10 +146,15 @@
     playClick();
   }
 
-  onMount(() => {
+  onMount(async () => {
     darkMode = document.documentElement.getAttribute("data-theme") === "dark";
     syncShowModuleFromUrl();
     window.addEventListener("popstate", onPopState);
+
+    // Only check auth if we're on an app path (dashboard, workflows, etc.)
+    if (showModule) {
+      await checkAuth();
+    }
 
     const urlParams = new URLSearchParams(window.location.search);
     const roomId = urlParams.get("room");
@@ -176,6 +208,7 @@
       if (response.ok) {
         inviteRoom = await response.json();
         inviteToken = token;
+        await checkAuth(); // Check auth before entering app
         showModule = true;
         window.history.replaceState({}, document.title, "/dashboard");
       } else {
@@ -191,6 +224,7 @@
       const response = await fetch(`${config.serverUrl}/api/rooms/${roomId}`);
       if (response.ok) {
         inviteRoom = await response.json();
+        await checkAuth(); // Check auth before entering app
         showModule = true;
         window.history.replaceState({}, document.title, "/dashboard");
       } else {
@@ -201,14 +235,22 @@
     }
   }
 
-  function toggleModule() {
-    showModule = !showModule;
-    inviteRoom = null;
-    inviteToken = null;
-    if (showModule) {
+  async function toggleModule() {
+    if (!showModule) {
+      // Entering the app - check auth first if not already checked
+      if (!authChecked) {
+        await checkAuth();
+      }
+      showModule = true;
+      inviteRoom = null;
+      inviteToken = null;
       window.history.pushState({}, document.title, "/dashboard");
       playOpen();
     } else {
+      // Leaving the app - go to landing
+      showModule = false;
+      inviteRoom = null;
+      inviteToken = null;
       window.history.pushState({}, document.title, "/");
       playClick();
     }
@@ -236,6 +278,7 @@
       if (response.ok) {
         const room = await response.json();
         inviteRoom = room;
+        await checkAuth(); // Check auth before entering app
         showModule = true;
         window.history.pushState({}, document.title, "/dashboard");
         quickJoinCode = "";
@@ -249,9 +292,15 @@
   }
 </script>
 
-{#if showModule}
+{#if showModule && !authChecked}
+  <div style="display: flex; align-items: center; justify-content: center; min-height: 100vh; font-family: system-ui, sans-serif; color: #666; background: var(--bg-primary);">
+    Loading...
+  </div>
+{:else if showModule && !user}
+  <Auth mode="login" onSuccess={handleAuthSuccess} serverUrl={config.serverUrl} />
+{:else if showModule}
   <div class="app-full">
-    <MessagingModule {config} {inviteRoom} {inviteToken} onClose={handleClose} />
+    <MessagingModule {config} {inviteRoom} {inviteToken} {user} onClose={handleClose} />
   </div>
 {:else}
 <main class="landing">

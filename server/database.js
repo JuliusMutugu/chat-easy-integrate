@@ -209,6 +209,16 @@ export async function initDatabase() {
         document_text TEXT,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
       );
+
+      CREATE TABLE IF NOT EXISTS users (
+        id TEXT PRIMARY KEY,
+        email TEXT UNIQUE NOT NULL,
+        password_hash TEXT NOT NULL,
+        name TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        last_login DATETIME
+      );
+      CREATE INDEX IF NOT EXISTS idx_users_email ON users (email);
     `);
 
     console.log("✅ Database initialized successfully");
@@ -620,6 +630,49 @@ export async function setWorkflowConfig(template, data) {
     [template, product, kpis, instructions, websiteText, documentText]
   );
   return getWorkflowConfig(template);
+}
+
+/** User authentication */
+function generateUserId() {
+  return "u-" + Date.now() + "-" + Math.random().toString(36).slice(2, 11);
+}
+
+export async function createUser(email, passwordHash, name) {
+  const userId = generateUserId();
+  await db.run(
+    "INSERT INTO users (id, email, password_hash, name) VALUES (?, ?, ?, ?)",
+    [userId, email.toLowerCase().trim(), passwordHash, name.trim()]
+  );
+  return getUserById(userId);
+}
+
+export async function getUserById(userId) {
+  const user = await db.get("SELECT id, email, name, created_at, last_login FROM users WHERE id = ?", [userId]);
+  if (!user) return null;
+  return {
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    createdAt: user.created_at ? new Date(user.created_at) : null,
+    lastLogin: user.last_login ? new Date(user.last_login) : null,
+  };
+}
+
+export async function getUserByEmail(email) {
+  const user = await db.get("SELECT * FROM users WHERE email = ?", [email.toLowerCase().trim()]);
+  if (!user) return null;
+  return {
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    passwordHash: user.password_hash,
+    createdAt: user.created_at ? new Date(user.created_at) : null,
+    lastLogin: user.last_login ? new Date(user.last_login) : null,
+  };
+}
+
+export async function updateUserLastLogin(userId) {
+  await db.run("UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = ?", [userId]);
 }
 
 export async function getRoomMessages(roomId, limit = 50) {

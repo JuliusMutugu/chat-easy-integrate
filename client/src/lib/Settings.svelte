@@ -92,6 +92,7 @@
       const res = await fetch(`${config.serverUrl}/api/me/export`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({ username: username || "me" }),
       });
       const data = await res.json().catch(() => ({}));
@@ -112,6 +113,7 @@
       const res = await fetch(`${config.serverUrl}/api/me/delete`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({ username: username || "me" }),
       });
       const data = await res.json().catch(() => ({}));

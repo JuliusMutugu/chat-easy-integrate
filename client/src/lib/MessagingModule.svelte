@@ -309,6 +309,7 @@
       const res = await fetch(`${config.serverUrl}/api/rooms/${roomId}/meta`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify(payload),
       });
       if (!res.ok) return;
@@ -367,7 +368,9 @@
   }
 
   function connectToServer() {
-    socket = io(config.serverUrl);
+    socket = io(config.serverUrl, {
+      withCredentials: true,
+    });
 
     socket.on("connect", () => {
       isConnected = true;
@@ -539,6 +542,19 @@
     profileDropdownOpen = false;
   }
 
+  async function handleLogout() {
+    try {
+      await fetch(`${config.serverUrl}/api/auth/logout`, {
+        method: "POST",
+        credentials: "include",
+      });
+      window.location.href = "/";
+    } catch (err) {
+      console.error("Logout failed:", err);
+      addNotification("warning", "Failed to logout", 3000);
+    }
+  }
+
   async function requestAiReply() {
     if (!currentRoom?.id || aiReplyLoading) return;
     aiReplyLoading = true;
@@ -572,6 +588,7 @@
       const res = await fetch(`${config.serverUrl}/api/ai/reply`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({ roomId: currentRoom.id, workflowContext }),
       });
       const data = await res.json().catch(() => ({}));
@@ -606,6 +623,7 @@
       const res = await fetch(`${config.serverUrl}/api/ai/fetch-url`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({ url }),
       });
       const data = await res.json().catch(() => ({}));
@@ -663,6 +681,7 @@
         await fetch(`${config.serverUrl}/api/workflows/${workflowTrainTemplate}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
+          credentials: "include",
           body: JSON.stringify(data),
         });
       } catch (_) {}

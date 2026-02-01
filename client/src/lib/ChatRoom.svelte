@@ -71,7 +71,9 @@
       return;
     }
     try {
-      const res = await fetch(`${config.serverUrl}/api/rooms/${room.id}`);
+      const res = await fetch(`${config.serverUrl}/api/rooms/${room.id}`, {
+        credentials: "include",
+      });
       if (res.ok) {
         const r = await res.json();
         if (r.inviteToken) {
@@ -123,6 +125,7 @@
       const res = await fetch(`${config.serverUrl}/api/rooms/${room.id}/invite`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({ invitedBy: config.username }),
       });
       if (res.ok) {
@@ -143,6 +146,7 @@
       const res = await fetch(`${config.serverUrl}/api/rooms/${room.id}/invite/send-email`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({ to: inviteEmail.trim() }),
       });
       const data = await res.json().catch(() => ({}));
@@ -168,6 +172,7 @@
       const res = await fetch(`${config.serverUrl}/api/rooms/${room.id}/meta`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({ assignedTo: usernameOrAgentValue || null }),
       });
       if (!res.ok) return;
@@ -182,6 +187,7 @@
             await fetch(`${config.serverUrl}/api/workflows/${template}`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
+              credentials: "include",
               body: JSON.stringify({
                 product: workflow.product ?? "",
                 kpis: workflow.kpis ?? "",
@@ -988,6 +994,28 @@
         };
       })()
     : { approve: 0, reject: 0 };
+
+  /** Last deal_terms message in the conversation (agreed terms). */
+  $: latestDealTerms = (() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i];
+      if (m.type === "deal_terms" && m.payload && (m.payload.price != null || m.payload.total != null))
+        return m.payload;
+    }
+    return null;
+  })();
+
+  /** Terms to show at top: from agreed deal terms or from active negotiation proposal. */
+  $: termsSummary = latestDealTerms
+    ? { type: "deal_terms", price: latestDealTerms.price, qty: latestDealTerms.qty, total: latestDealTerms.total, subtotal: latestDealTerms.subtotal }
+    : currentNegotiation?.proposal
+      ? { type: "negotiation", proposal: currentNegotiation.proposal }
+      : null;
+
+  function formatTermsMoney(n) {
+    if (n == null || isNaN(n)) return "—";
+    return new Intl.NumberFormat("en-KE", { style: "decimal", minimumFractionDigits: 2 }).format(n);
+  }
 </script>
 
 <svelte:window onclick={(e) => { if (showAssignPanel && !e.target.closest('.header-assign-wrap')) showAssignPanel = false; }} />
@@ -1269,7 +1297,7 @@
           <button type="button" class="drawer-close" onclick={() => (showDealPanel = false)} aria-label="Close">×</button>
         </div>
         <div class="drawer-body">
-          <DealPanel roomId={room.id} username={config.username} {socket} config={config} onSendTerms={sendDealTerms} />
+          <DealPanel roomId={room.id} username={config.username} {socket} config={config} onSendTerms={sendDealTerms} initialTerms={latestDealTerms} />
         </div>
       </div>
     </div>
@@ -1415,7 +1443,34 @@
   </div>
 
   <div class="messages-wrap">
+    <!-- Human handover: when room is assigned to an agent, show option to take over (e.g. to send images) -->
+    {#if room.assignedTo && room.assignedTo.startsWith && room.assignedTo.startsWith('agent:') && room.createdByUsername === config.username}
+      <div class="handover-bar" role="region" aria-label="Agent handling">
+        <span class="handover-text">{getAssignedToDisplay(room.assignedTo)} is handling this conversation.</span>
+        <button type="button" class="handover-btn" onclick={() => assignTo(config.username)} disabled={assignInProgress} title="Take over to reply and send images yourself">
+          Take over
+        </button>
+      </div>
+    {/if}
     <div class="messages-scroll" bind:this={messagesContainer}>
+    <!-- Agreed terms / negotiation proposal at top (from conversation or from who started negotiation) -->
+    {#if termsSummary}
+      <div class="terms-summary-bar" role="region" aria-label="Current terms">
+        {#if termsSummary.type === "deal_terms"}
+          <span class="terms-summary-text">
+            <strong>Agreed terms:</strong> Price {formatTermsMoney(termsSummary.price)} × {termsSummary.qty ?? "—"} · Total {formatTermsMoney(termsSummary.total ?? termsSummary.subtotal)}
+          </span>
+        {:else}
+          <span class="terms-summary-text"><strong>Proposal:</strong> {termsSummary.proposal}</span>
+        {/if}
+        <button type="button" class="terms-summary-amend" onclick={() => (showDealPanel = true)}>Amend</button>
+      </div>
+    {:else}
+      <div class="terms-summary-bar terms-summary-empty">
+        <span class="terms-summary-text">No terms yet</span>
+        <button type="button" class="terms-summary-amend" onclick={() => (showDealPanel = true)}>Propose terms</button>
+      </div>
+    {/if}
     {#if room.description && !greetingDismissed}
       <div class="room-greeting">
         <p class="room-greeting-desc">{room.description}</p>
@@ -1700,6 +1755,89 @@
     flex-direction: column;
     min-height: 0;
     overflow: hidden;
+  }
+
+  .handover-bar {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.5rem 1.25rem;
+    background: var(--gray-100);
+    border-bottom: 1px solid var(--border);
+    font-size: 0.8125rem;
+  }
+
+  .handover-text {
+    color: var(--text-secondary);
+  }
+
+  .handover-btn {
+    flex-shrink: 0;
+    padding: 0.35rem 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--card-bg);
+    color: var(--text-primary);
+    font-size: 0.8125rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background-color 0.15s ease, border-color 0.15s ease;
+  }
+
+  .handover-btn:hover:not(:disabled) {
+    background: var(--gray-200);
+    border-color: var(--gray-400);
+  }
+
+  .handover-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  .terms-summary-bar {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.5rem 1.25rem;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border);
+    font-size: 0.8125rem;
+  }
+
+  .terms-summary-bar.terms-summary-empty {
+    background: transparent;
+    border-bottom-color: var(--border);
+  }
+
+  .terms-summary-text {
+    color: var(--text-primary);
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .terms-summary-amend {
+    flex-shrink: 0;
+    padding: 0.35rem 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--card-bg);
+    color: var(--text-primary);
+    font-size: 0.75rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background-color 0.15s ease, border-color 0.15s ease;
+  }
+
+  .terms-summary-amend:hover {
+    background: var(--gray-100);
+    border-color: var(--gray-400);
   }
 
   .chat-room .messages-scroll {

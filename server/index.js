@@ -3,6 +3,8 @@ import express from "express";
 import { createServer } from "http";
 import { Server } from "socket.io";
 import cors from "cors";
+import session from "express-session";
+import bcrypt from "bcrypt";
 import multer from "multer";
 import path from "path";
 import fs from "fs";
@@ -46,6 +48,10 @@ import {
   getDealEvents,
   getRoomMemberRoles,
   setRoomMemberRole,
+  createUser,
+  getUserById,
+  getUserByEmail,
+  updateUserLastLogin,
 } from "./database.js";
 import { sendEmail, validateEmailConfig } from "./channels/email.js";
 import { sendSms, sendSmsDev, validateSmsConfig } from "./channels/sms.js";
@@ -54,15 +60,36 @@ import { GoogleGenAI } from "@google/genai";
 
 const app = express();
 const server = createServer(app);
+
+// Session store for socket.io to share sessions with Express
+const sessionMiddleware = session({
+  secret: process.env.SESSION_SECRET || "nego-secret-change-in-production",
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    secure: process.env.NODE_ENV === "production",
+    httpOnly: true,
+    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+  },
+});
+
 const io = new Server(server, {
   cors: {
-    origin: "*",
+    origin: process.env.CLIENT_URL || "http://localhost:5173",
+    credentials: true,
     methods: ["GET", "POST"],
   },
 });
 
-app.use(cors());
+app.use(cors({
+  origin: process.env.CLIENT_URL || "http://localhost:5173",
+  credentials: true,
+}));
 app.use(express.json());
+app.use(sessionMiddleware);
+
+// Socket.io uses the same session middleware
+io.engine.use(sessionMiddleware);
 
 // Initialize database
 await initDatabase();
@@ -143,12 +170,94 @@ async function generateAiReply(apiKey, roomId, workflowContext) {
   return { reply };
 }
 
+// Auth middleware
+function requireAuth(req, res, next) {
+  if (!req.session?.userId) {
+    return res.status(401).json({ error: "Not authenticated" });
+  }
+  next();
+}
+
 // API Routes
 app.get("/api/health", (req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });
 });
 
-app.post("/api/rooms", async (req, res) => {
+// Auth routes
+app.post("/api/auth/register", async (req, res) => {
+  try {
+    const { email, password, name } = req.body;
+    if (!email || !password || !name) {
+      return res.status(400).json({ error: "Email, password, and name are required" });
+    }
+    if (password.length < 6) {
+      return res.status(400).json({ error: "Password must be at least 6 characters" });
+    }
+    const existing = await getUserByEmail(email);
+    if (existing) {
+      return res.status(400).json({ error: "Email already registered" });
+    }
+    const passwordHash = await bcrypt.hash(password, 10);
+    const user = await createUser(email, passwordHash, name);
+    req.session.userId = user.id;
+    await updateUserLastLogin(user.id);
+    res.json({ user: { id: user.id, email: user.email, name: user.name } });
+  } catch (error) {
+    console.error("Register error:", error);
+    res.status(500).json({ error: "Failed to register" });
+  }
+});
+
+app.post("/api/auth/login", async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    if (!email || !password) {
+      return res.status(400).json({ error: "Email and password are required" });
+    }
+    const user = await getUserByEmail(email);
+    if (!user) {
+      return res.status(401).json({ error: "Invalid email or password" });
+    }
+    const valid = await bcrypt.compare(password, user.passwordHash);
+    if (!valid) {
+      return res.status(401).json({ error: "Invalid email or password" });
+    }
+    req.session.userId = user.id;
+    await updateUserLastLogin(user.id);
+    res.json({ user: { id: user.id, email: user.email, name: user.name } });
+  } catch (error) {
+    console.error("Login error:", error);
+    res.status(500).json({ error: "Failed to login" });
+  }
+});
+
+app.post("/api/auth/logout", (req, res) => {
+  req.session.destroy((err) => {
+    if (err) {
+      return res.status(500).json({ error: "Failed to logout" });
+    }
+    res.json({ ok: true });
+  });
+});
+
+app.get("/api/auth/me", async (req, res) => {
+  try {
+    if (!req.session?.userId) {
+      return res.status(401).json({ error: "Not authenticated" });
+    }
+    const user = await getUserById(req.session.userId);
+    if (!user) {
+      req.session.destroy();
+      return res.status(401).json({ error: "User not found" });
+    }
+    res.json({ user: { id: user.id, email: user.email, name: user.name } });
+  } catch (error) {
+    console.error("Get user error:", error);
+    res.status(500).json({ error: "Failed to get user" });
+  }
+});
+
+app.post("/api/rooms", requireAuth, async (req, res) => {
   try {
     const { name, description, maxUsers = 10, createdBy } = req.body;
     const serverUrl = `${req.protocol}://${req.get("host")}`;
@@ -202,7 +311,7 @@ function generateInviteToken() {
   return token;
 }
 
-app.get("/api/rooms", async (req, res) => {
+app.get("/api/rooms", requireAuth, async (req, res) => {
   try {
     const username = req.query.username;
     const rooms = username ? await getRoomsForUser(username) : await getAllRooms();
@@ -334,7 +443,7 @@ app.get("/api/rooms/:roomId/messages", async (req, res) => {
 });
 
 // Save workflow config (synced from client when user clicks "Save and use this agent")
-app.post("/api/workflows/:template", async (req, res) => {
+app.post("/api/workflows/:template", requireAuth, async (req, res) => {
   try {
     const { template } = req.params;
     const valid = ["sales-engineer", "marketing-engineer", "receptionist"];
@@ -357,7 +466,7 @@ app.post("/api/workflows/:template", async (req, res) => {
 });
 
 // AI reply: use Gemini (key from .env) to generate a reply from recent conversation + optional workflow context
-app.post("/api/ai/reply", async (req, res) => {
+app.post("/api/ai/reply", requireAuth, async (req, res) => {
   try {
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey || !apiKey.trim()) {
@@ -843,8 +952,27 @@ app.get("/invite/:inviteToken", async (req, res) => {
 });
 
 // Socket.IO Events
-io.on("connection", (socket) => {
+io.on("connection", async (socket) => {
   console.log("User connected:", socket.id);
+  
+  // Check authentication
+  const userId = socket.request.session?.userId;
+  if (!userId) {
+    console.log("Unauthenticated socket connection:", socket.id);
+    socket.emit("error", { message: "Not authenticated. Please log in." });
+    socket.disconnect();
+    return;
+  }
+  
+  const user = await getUserById(userId);
+  if (!user) {
+    console.log("Invalid user for socket:", socket.id);
+    socket.emit("error", { message: "User not found" });
+    socket.disconnect();
+    return;
+  }
+  
+  console.log("Authenticated user connected:", user.email, socket.id);
 
   socket.on("set-username", ({ username }) => {
     if (!username || typeof username !== "string") return;

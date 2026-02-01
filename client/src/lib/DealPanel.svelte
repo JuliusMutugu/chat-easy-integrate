@@ -5,7 +5,7 @@
    * $state: price, qty, sla (user-editable).
    * $derived: tax, shipping, margin (instant recalc, no reload).
    */
-  let { roomId = "", username = "", socket = null, config = { serverUrl: "" }, onSendTerms = () => {} } = $props();
+  let { roomId = "", username = "", socket = null, config = { serverUrl: "" }, onSendTerms = () => {}, initialTerms = null } = $props();
 
   let dealEvents = $state([]);
 
@@ -16,12 +16,23 @@
   let shippingFlat = $state(10);
   let marginPct = $state(20);
 
+  function applyInitialTerms(terms) {
+    if (!terms || typeof terms.price !== "number") return;
+    price = terms.price;
+    if (typeof terms.qty === "number" && terms.qty >= 1) qty = terms.qty;
+    if (typeof terms.slaDays === "number" && terms.slaDays >= 1) slaDays = terms.slaDays;
+    if (typeof terms.taxRatePct === "number") taxRatePct = terms.taxRatePct;
+    if (typeof terms.shippingFlat === "number") shippingFlat = terms.shippingFlat;
+    if (typeof terms.marginPct === "number") marginPct = terms.marginPct;
+  }
+
   onMount(() => {
     loadEvents();
     if (socket) {
       socket.on("deal-term-updated", onTermUpdated);
       socket.on("deal-event", onDealEvent);
     }
+    applyInitialTerms(initialTerms);
   });
 
   onDestroy(() => {
@@ -34,7 +45,9 @@
   async function loadEvents() {
     if (!roomId || !config.serverUrl) return;
     try {
-      const res = await fetch(`${config.serverUrl}/api/rooms/${roomId}/deal-events`);
+      const res = await fetch(`${config.serverUrl}/api/rooms/${roomId}/deal-events`, {
+        credentials: "include",
+      });
       if (res.ok) dealEvents = await res.json();
     } catch (_) {}
   }
