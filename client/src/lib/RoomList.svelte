@@ -1,5 +1,5 @@
 <script>
-  import { playClick, playSuccess } from "./theme.js";
+  import { playClick, playSuccess, safeParseJson } from "./theme.js";
 
   export let rooms = [];
   export const config = {};
@@ -45,11 +45,11 @@
         }
       );
       if (response.ok) {
-        const data = await response.json();
-        inviteLink = data.inviteLink;
+        const data = await safeParseJson(response);
+        inviteLink = data?.inviteLink || inviteLink;
         showToast("New invite link generated.");
       } else {
-        const err = await response.json().catch(() => ({}));
+        const err = await safeParseJson(response) || {};
         showToast(err.error || "Failed to generate new invite link.");
       }
     } catch (error) {
@@ -134,7 +134,7 @@ How to join:
 
 <div class="room-list">
   <div class="list-header">
-    <h3 class="list-title">Messaging</h3>
+    <h3 class="list-title">Your rooms</h3>
     <div class="list-actions">
       <div class="search-wrap">
         <input

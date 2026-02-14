@@ -1,5 +1,15 @@
 import { mount } from "svelte";
 import App from "./App.svelte";
+import { setThemePreference, getThemePreference, applySystemTheme, applyAppearanceCustomization } from "./lib/theme.js";
+
+// Apply saved appearance (light / dark / system) on load
+setThemePreference(getThemePreference());
+applyAppearanceCustomization();
+
+// When preference is "system", update theme when OS theme changes
+if (typeof window !== "undefined") {
+  window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", applySystemTheme);
+}
 
 const app = mount(App, {
   target: document.getElementById("app"),
