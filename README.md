@@ -90,6 +90,9 @@ function handleClose() {
 - `GET /api/rooms` - List all rooms
 - `POST /api/rooms` - Create new room
 - `GET /api/health` - Server health check
+- `GET /api/sms-reseller/clients` - List SMS reseller clients (business + KYC approved)
+- `POST /api/sms-reseller/clients` - Create an SMS reseller client/provider profile
+- `POST /api/sms-reseller/quotes` - Generate and store reseller pricing quote (e.g. KES 0.30/SMS)
 
 ### Socket Events
 
@@ -187,7 +190,15 @@ Extend functionality by modifying the Svelte components in `client/src/lib/`.
 
 ## 🎯 Strategy & Roadmap
 
-See **[Competitive Strategy](docs/COMPETITIVE_STRATEGY.md)** for how this project aligns with Twilio and Africa's Talking (feature parity and patterns) and our edge as an open source, embeddable, self-hosted messaging platform.
+See **[Competitive Strategy](docs/COMPETITIVE_STRATEGY.md)** for positioning and our edge as an open source, embeddable, self-hosted messaging platform.
+
+For production launch prep as an SMS-selling business, use **[SMS Seller Readiness](docs/SMS_SELLER_READINESS.md)**.
+
+For sales and onboarding assets, use:
+- **[Client Proposal (Imara Logic)](docs/SMS_CLIENT_PROPOSAL_IMARALOGIC.md)**
+- **[SMS Reseller API Spec](docs/SMS_RESELLER_API_SPEC.md)**
+- **[SMS Profit Calculator (Kenya)](docs/SMS_PROFIT_CALCULATOR_KENYA.md)**
+- **[SMS Outreach Template](docs/SMS_OUTREACH_TEMPLATE.md)**
 
 ## 🤝 Contributing
 

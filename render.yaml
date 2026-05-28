@@ -2,7 +2,6 @@ services:
   - type: web
     name: nego-messaging
     runtime: node
-    env: node
     region: oregon
     plan: starter
     branch: main
@@ -28,20 +27,24 @@ services:
         sync: false
       - key: GEMINI_API_KEY
         sync: false
-      - key: AFRICASTALKING_USERNAME
+      - key: SMS_GATEWAY_URL
         sync: false
-      - key: AFRICASTALKING_API_KEY
+      - key: SMS_GATEWAY_API_KEY
         sync: false
-      - key: AFRICASTALKING_SANDBOX
-        value: false
-      - key: EMAIL_HOST
+      - key: SMS_GATEWAY_METHOD
+        value: POST
+      - key: SMS_SELL_RATE_KES
+        value: 0.30
+      - key: SMTP_HOST
         sync: false
-      - key: EMAIL_PORT
+      - key: SMTP_PORT
         value: 587
-      - key: EMAIL_USER
+      - key: SMTP_SECURE
+        value: "false"
+      - key: SMTP_USER
         sync: false
-      - key: EMAIL_PASS
+      - key: SMTP_PASS
         sync: false
-      - key: EMAIL_FROM
+      - key: SMTP_FROM
         sync: false
     autoDeploy: true

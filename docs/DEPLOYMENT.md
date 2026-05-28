@@ -32,17 +32,17 @@ This guide will walk you through deploying the Nego Messaging Platform on Render
    **Required:**
    - `GEMINI_API_KEY` - Your Google Gemini AI API key
    
-   **Optional (for SMS):**
-   - `AFRICASTALKING_USERNAME` - Your Africa's Talking username (or "sandbox")
-   - `AFRICASTALKING_API_KEY` - Your Africa's Talking API key
-   - `AFRICASTALKING_SANDBOX` - Set to `true` for sandbox mode
+  **Optional (for SMS routing):**
+  - `SMS_GATEWAY_URL` - Your own SMS routing endpoint (SMPP/HTTP bridge)
+  - `SMS_GATEWAY_API_KEY` - Optional bearer token for your gateway
+  - `SMS_GATEWAY_METHOD` - Optional HTTP method (default: `POST`)
    
-   **Optional (for Email):**
-   - `EMAIL_HOST` - SMTP host (e.g., smtp.gmail.com)
-   - `EMAIL_PORT` - SMTP port (default: 587)
-   - `EMAIL_USER` - SMTP username
-   - `EMAIL_PASS` - SMTP password
-   - `EMAIL_FROM` - From email address
+  **Optional (for Email):**
+  - `SMTP_HOST` - SMTP host (e.g., smtp.gmail.com)
+  - `SMTP_PORT` - SMTP port (default: 587)
+  - `SMTP_USER` - SMTP username
+  - `SMTP_PASS` - SMTP password
+  - `SMTP_FROM` - From email address
    
    **Auto-generated (leave as is):**
    - `SESSION_SECRET` - Auto-generated secure secret
@@ -81,17 +81,17 @@ This guide will walk you through deploying the Nego Messaging Platform on Render
    DATABASE_PATH=./server/messaging.db
    GEMINI_API_KEY=<your-gemini-api-key>
    
-   # Optional - Africa's Talking SMS
-   AFRICASTALKING_USERNAME=sandbox
-   AFRICASTALKING_API_KEY=<your-key>
-   AFRICASTALKING_SANDBOX=true
+   # Optional - SMS routing (your own gateway/SMPP bridge)
+   SMS_GATEWAY_URL=https://your-sms-router.example.com/send
+   SMS_GATEWAY_API_KEY=<your-key>
+   SMS_GATEWAY_METHOD=POST
    
    # Optional - Email
-   EMAIL_HOST=smtp.gmail.com
-   EMAIL_PORT=587
-   EMAIL_USER=<your-email>
-   EMAIL_PASS=<your-password>
-   EMAIL_FROM=<from-email>
+   SMTP_HOST=smtp.gmail.com
+   SMTP_PORT=587
+   SMTP_USER=<your-email>
+   SMTP_PASS=<your-password>
+   SMTP_FROM=<from-email>
    ```
 
 4. **Create the Service**

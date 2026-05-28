@@ -312,6 +312,39 @@ export async function initDatabase() {
       CREATE INDEX IF NOT EXISTS idx_nurture_user ON nurture_templates (user_id);
     `);
 
+    await db.exec(`
+      CREATE TABLE IF NOT EXISTS sms_reseller_clients (
+        id TEXT PRIMARY KEY,
+        provider_name TEXT NOT NULL,
+        contact_name TEXT,
+        contact_email TEXT,
+        contact_phone TEXT,
+        sell_rate_kes REAL NOT NULL DEFAULT 0.30,
+        status TEXT DEFAULT 'active',
+        notes TEXT,
+        created_by_user_id TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_sms_reseller_clients_status ON sms_reseller_clients (status);
+
+      CREATE TABLE IF NOT EXISTS sms_reseller_quotes (
+        id TEXT PRIMARY KEY,
+        client_id TEXT,
+        message_count INTEGER NOT NULL,
+        segments_per_message INTEGER NOT NULL DEFAULT 1,
+        total_sms_units INTEGER NOT NULL,
+        sell_rate_kes REAL NOT NULL,
+        estimated_revenue_kes REAL NOT NULL,
+        estimated_provider_cost_kes REAL,
+        estimated_margin_kes REAL,
+        created_by_user_id TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (client_id) REFERENCES sms_reseller_clients (id) ON DELETE SET NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_sms_reseller_quotes_client ON sms_reseller_quotes (client_id);
+    `);
+
     console.log("✅ Database initialized successfully");
     return db;
   } catch (error) {
@@ -1302,6 +1335,118 @@ export async function saveOutboundMessage(channel, recipient, body, status = "se
     [channel, recipient, body, status, externalId]
   );
   return result.lastID;
+}
+
+/** SMS reseller management */
+function generateResellerClientId() {
+  return "src-" + Date.now() + "-" + Math.random().toString(36).slice(2, 9);
+}
+
+function generateResellerQuoteId() {
+  return "srq-" + Date.now() + "-" + Math.random().toString(36).slice(2, 9);
+}
+
+export async function createSmsResellerClient({
+  providerName,
+  contactName,
+  contactEmail,
+  contactPhone,
+  sellRateKes = 0.30,
+  status = "active",
+  notes = "",
+  createdByUserId = null,
+}) {
+  const id = generateResellerClientId();
+  await db.run(
+    `INSERT INTO sms_reseller_clients
+      (id, provider_name, contact_name, contact_email, contact_phone, sell_rate_kes, status, notes, created_by_user_id, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+    [
+      id,
+      providerName,
+      contactName || null,
+      contactEmail || null,
+      contactPhone || null,
+      Number(sellRateKes),
+      status || "active",
+      notes || "",
+      createdByUserId,
+    ]
+  );
+  return getSmsResellerClientById(id);
+}
+
+export async function getSmsResellerClientById(id) {
+  const row = await db.get("SELECT * FROM sms_reseller_clients WHERE id = ?", [id]);
+  if (!row) return null;
+  return {
+    id: row.id,
+    providerName: row.provider_name,
+    contactName: row.contact_name,
+    contactEmail: row.contact_email,
+    contactPhone: row.contact_phone,
+    sellRateKes: Number(row.sell_rate_kes),
+    status: row.status,
+    notes: row.notes || "",
+    createdByUserId: row.created_by_user_id,
+    createdAt: row.created_at ? new Date(row.created_at) : null,
+    updatedAt: row.updated_at ? new Date(row.updated_at) : null,
+  };
+}
+
+export async function listSmsResellerClients() {
+  const rows = await db.all("SELECT * FROM sms_reseller_clients ORDER BY created_at DESC");
+  return rows.map((row) => ({
+    id: row.id,
+    providerName: row.provider_name,
+    contactName: row.contact_name,
+    contactEmail: row.contact_email,
+    contactPhone: row.contact_phone,
+    sellRateKes: Number(row.sell_rate_kes),
+    status: row.status,
+    notes: row.notes || "",
+    createdByUserId: row.created_by_user_id,
+    createdAt: row.created_at ? new Date(row.created_at) : null,
+    updatedAt: row.updated_at ? new Date(row.updated_at) : null,
+  }));
+}
+
+export async function createSmsResellerQuote({
+  clientId = null,
+  messageCount,
+  segmentsPerMessage = 1,
+  sellRateKes,
+  providerCostRateKes = null,
+  createdByUserId = null,
+}) {
+  const safeMessages = Math.max(0, parseInt(messageCount, 10) || 0);
+  const safeSegments = Math.max(1, parseInt(segmentsPerMessage, 10) || 1);
+  const units = safeMessages * safeSegments;
+  const safeSellRate = Number(sellRateKes);
+  const revenue = units * safeSellRate;
+  const providerCostRate = providerCostRateKes == null ? null : Number(providerCostRateKes);
+  const providerCost = providerCostRate == null ? null : units * providerCostRate;
+  const margin = providerCost == null ? null : revenue - providerCost;
+  const id = generateResellerQuoteId();
+
+  await db.run(
+    `INSERT INTO sms_reseller_quotes
+      (id, client_id, message_count, segments_per_message, total_sms_units, sell_rate_kes, estimated_revenue_kes, estimated_provider_cost_kes, estimated_margin_kes, created_by_user_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [id, clientId, safeMessages, safeSegments, units, safeSellRate, revenue, providerCost, margin, createdByUserId]
+  );
+
+  return {
+    id,
+    clientId,
+    messageCount: safeMessages,
+    segmentsPerMessage: safeSegments,
+    totalSmsUnits: units,
+    sellRateKes: safeSellRate,
+    estimatedRevenueKes: revenue,
+    estimatedProviderCostKes: providerCost,
+    estimatedMarginKes: margin,
+  };
 }
 
 // Deal events (audit trail: who changed what, when)

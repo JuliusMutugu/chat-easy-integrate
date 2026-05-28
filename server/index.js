@@ -74,6 +74,10 @@ import {
   createNurtureTemplate,
   getNurtureTemplatesByUserId,
   deleteNurtureTemplate,
+  createSmsResellerClient,
+  listSmsResellerClients,
+  getSmsResellerClientById,
+  createSmsResellerQuote,
 } from "./database.js";
 import { sendEmail, validateEmailConfig } from "./channels/email.js";
 import { sendSmsWithConfig, validateSmsConfig } from "./channels/sms.js";
@@ -301,6 +305,34 @@ function requireAuth(req, res, next) {
     return res.status(401).json({ error: "Not authenticated" });
   }
   next();
+}
+
+function getDefaultSmsSellRate() {
+  const val = Number(process.env.SMS_SELL_RATE_KES ?? "0.30");
+  return Number.isFinite(val) && val > 0 ? val : 0.30;
+}
+
+async function requireBusinessKycApproved(req, res, next) {
+  try {
+    if (!req.session?.userId) {
+      return res.status(401).json({ error: "Not authenticated" });
+    }
+    const user = await getUserById(req.session.userId);
+    if (!user) {
+      return res.status(401).json({ error: "User not found" });
+    }
+    if (!user.isBusiness) {
+      return res.status(403).json({ error: "Business account required for SMS operations" });
+    }
+    if (user.kycStatus !== "approved") {
+      return res.status(403).json({ error: "KYC approval required before sending SMS" });
+    }
+    req.currentUser = user;
+    next();
+  } catch (error) {
+    console.error("Business/KYC check failed:", error);
+    res.status(500).json({ error: "Failed to verify account readiness" });
+  }
 }
 
 // API Routes
@@ -1155,28 +1187,28 @@ async function getEmailConfig() {
   return merged;
 }
 
-/** SMS config: DB (Integrations) merged with .env AFRICASTALKING_*; env values are quote-stripped. */
+/** SMS config: DB (Integrations) merged with .env SMS_GATEWAY_*; env values are quote-stripped. */
 async function getSmsConfig() {
   const fromDb = (await getChannelConfig("sms"))?.config || {};
-  const envUsername = process.env.AFRICASTALKING_USERNAME;
-  const envApiKey = process.env.AFRICASTALKING_API_KEY;
   const merged = { ...fromDb };
-  // Africa's Talking from .env (takes precedence when both username and apiKey are set)
-  if (envUsername && envApiKey) {
-    merged.provider = "africastalking";
-    merged.apiKey = stripEnvQuotes(String(envApiKey));
-    merged.sandbox = process.env.AFRICASTALKING_SANDBOX !== "false" && process.env.AFRICASTALKING_SANDBOX !== "0";
-    // Sandbox requires username "sandbox"; live uses your app username
-    merged.username = merged.sandbox ? "sandbox" : stripEnvQuotes(String(envUsername));
-    const senderId = process.env.AFRICASTALKING_SENDER_ID;
-    if (senderId) merged.senderId = stripEnvQuotes(String(senderId));
+  const gatewayUrl = process.env.SMS_GATEWAY_URL;
+  const gatewayApiKey = process.env.SMS_GATEWAY_API_KEY;
+  const gatewayMethod = process.env.SMS_GATEWAY_METHOD;
+  if (gatewayUrl) {
+    merged.gatewayUrl = stripEnvQuotes(String(gatewayUrl));
+  }
+  if (gatewayApiKey) {
+    merged.apiKey = stripEnvQuotes(String(gatewayApiKey));
+  }
+  if (gatewayMethod) {
+    merged.method = stripEnvQuotes(String(gatewayMethod)).toUpperCase();
   }
   return merged;
 }
 
 const CHANNEL_NAMES = ["email", "sms", "whatsapp", "identity", "payments"];
 
-app.get("/api/channels/:channel", async (req, res) => {
+app.get("/api/channels/:channel", requireAuth, async (req, res) => {
   try {
     const { channel } = req.params;
     if (!CHANNEL_NAMES.includes(channel)) {
@@ -1190,7 +1222,7 @@ app.get("/api/channels/:channel", async (req, res) => {
   }
 });
 
-app.put("/api/channels/:channel", async (req, res) => {
+app.put("/api/channels/:channel", requireAuth, async (req, res) => {
   try {
     const { channel } = req.params;
     if (!CHANNEL_NAMES.includes(channel)) {
@@ -1206,7 +1238,7 @@ app.put("/api/channels/:channel", async (req, res) => {
   }
 });
 
-app.post("/api/channels/email/send", async (req, res) => {
+app.post("/api/channels/email/send", requireAuth, async (req, res) => {
   try {
     const { to, subject, text, html } = req.body || {};
     if (!to) return res.status(400).json({ error: "to is required" });
@@ -1222,16 +1254,19 @@ app.post("/api/channels/email/send", async (req, res) => {
   }
 });
 
-app.post("/api/channels/sms/send", async (req, res) => {
+app.post("/api/channels/sms/send", requireBusinessKycApproved, async (req, res) => {
   try {
     const { to, body } = req.body || {};
     if (!to) return res.status(400).json({ error: "to is required" });
+    if (!body || !String(body).trim()) {
+      return res.status(400).json({ error: "body is required" });
+    }
     const config = await getSmsConfig();
     const valid = validateSmsConfig(config);
     if (!valid.valid) {
-      return res.status(400).json({ error: valid.error || "SMS not configured. Add AFRICASTALKING_USERNAME and AFRICASTALKING_API_KEY to .env" });
+      return res.status(400).json({ error: valid.error || "SMS not configured. Set SMS gateway URL in Integrations or SMS_GATEWAY_URL in .env" });
     }
-    const result = await sendSmsWithConfig(config, { to, body });
+    const result = await sendSmsWithConfig(config, { to, body: String(body).trim() });
     await saveOutboundMessage("sms", Array.isArray(to) ? to.join(",") : String(to), body || "", "sent", result.externalId);
     const json = { success: true, externalId: result.externalId };
     if (result.recipientStatus) json.recipientStatus = result.recipientStatus;
@@ -1242,7 +1277,7 @@ app.post("/api/channels/sms/send", async (req, res) => {
   }
 });
 
-app.post("/api/channels/whatsapp/send", async (req, res) => {
+app.post("/api/channels/whatsapp/send", requireAuth, async (req, res) => {
   try {
     const { to, body } = req.body || {};
     if (!to) return res.status(400).json({ error: "to is required" });
@@ -1254,6 +1289,91 @@ app.post("/api/channels/whatsapp/send", async (req, res) => {
   } catch (err) {
     console.error("Error sending WhatsApp:", err);
     res.status(500).json({ error: err.message || "Failed to send WhatsApp" });
+  }
+});
+
+// SMS reseller operations (Kenya bulk SMS business)
+app.get("/api/sms-reseller/clients", requireBusinessKycApproved, async (_req, res) => {
+  try {
+    const clients = await listSmsResellerClients();
+    res.json({ clients });
+  } catch (err) {
+    console.error("List reseller clients error:", err);
+    res.status(500).json({ error: err.message || "Failed to load reseller clients" });
+  }
+});
+
+app.post("/api/sms-reseller/clients", requireBusinessKycApproved, async (req, res) => {
+  try {
+    const {
+      providerName,
+      contactName,
+      contactEmail,
+      contactPhone,
+      sellRateKes = getDefaultSmsSellRate(),
+      status = "active",
+      notes = "",
+    } = req.body || {};
+
+    if (!providerName || typeof providerName !== "string" || !providerName.trim()) {
+      return res.status(400).json({ error: "providerName is required" });
+    }
+    const rate = Number(sellRateKes);
+    if (!Number.isFinite(rate) || rate <= 0) {
+      return res.status(400).json({ error: "sellRateKes must be a positive number" });
+    }
+
+    const client = await createSmsResellerClient({
+      providerName: providerName.trim(),
+      contactName,
+      contactEmail,
+      contactPhone,
+      sellRateKes: rate,
+      status,
+      notes,
+      createdByUserId: req.session.userId,
+    });
+    res.json(client);
+  } catch (err) {
+    console.error("Create reseller client error:", err);
+    res.status(500).json({ error: err.message || "Failed to create reseller client" });
+  }
+});
+
+app.post("/api/sms-reseller/quotes", requireBusinessKycApproved, async (req, res) => {
+  try {
+    const {
+      clientId = null,
+      messageCount,
+      segmentsPerMessage = 1,
+      providerCostRateKes = null,
+      sellRateKes = null,
+    } = req.body || {};
+
+    if (!messageCount || Number(messageCount) <= 0) {
+      return res.status(400).json({ error: "messageCount must be greater than zero" });
+    }
+
+    let appliedSellRate = sellRateKes;
+    if (clientId && appliedSellRate == null) {
+      const client = await getSmsResellerClientById(clientId);
+      if (!client) return res.status(404).json({ error: "Reseller client not found" });
+      appliedSellRate = client.sellRateKes;
+    }
+    if (appliedSellRate == null) appliedSellRate = getDefaultSmsSellRate();
+
+    const quote = await createSmsResellerQuote({
+      clientId,
+      messageCount,
+      segmentsPerMessage,
+      sellRateKes: appliedSellRate,
+      providerCostRateKes,
+      createdByUserId: req.session.userId,
+    });
+    res.json(quote);
+  } catch (err) {
+    console.error("Create reseller quote error:", err);
+    res.status(500).json({ error: err.message || "Failed to create quote" });
   }
 });
 
