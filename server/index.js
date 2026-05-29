@@ -110,7 +110,9 @@ const SQLiteStore = connectSqlite3(session);
 
 const sessionMiddleware = session({
   store: new SQLiteStore({
-    db: databaseFile,
+    dir: path.dirname(databaseFile),
+    db: path.basename(databaseFile),
+    createDirIfNotExists: true,
     table: "sessions",
   }),
   secret: process.env.SESSION_SECRET || "nego-secret-change-in-production",

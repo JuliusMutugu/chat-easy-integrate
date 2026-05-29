@@ -32,15 +32,21 @@ function ensureDatabaseDirectory(filePath) {
 /** Create parent dir; fall back off /data when no Render disk is mounted. */
 export function prepareDatabasePath() {
   let filename = resolveDatabasePath();
-  if (!ensureDatabaseDirectory(filename) && filename.startsWith("/data")) {
+  const needsDataFallback =
+    filename.startsWith("/data") &&
+    (!fs.existsSync("/data") || !ensureDatabaseDirectory(filename));
+
+  if (needsDataFallback) {
     console.warn(
-      "[db] /data not writable (add a Render Disk or set DATABASE_PATH=./server/messaging.db) — using ./server/messaging.db"
+      "[db] /data unavailable — using server/messaging.db (attach a Render Disk + DATABASE_PATH=/data/messaging.db to persist)"
     );
     filename = path.join(__dirname, "messaging.db");
     process.env.DATABASE_PATH = filename;
     ensureDatabaseDirectory(filename);
+  } else {
+    ensureDatabaseDirectory(filename);
   }
-  return filename;
+  return path.resolve(filename);
 }
 
 export async function initDatabase() {
