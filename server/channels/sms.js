@@ -15,15 +15,18 @@ function useTraccarGateway(config) {
   return provider === "traccar";
 }
 
-function useKannelFormat(config) {
-  const fmt = (
-    config?.gatewayFormat ??
-    process.env.SMPP_GATEWAY_FORMAT ??
-    ""
-  )
+function gatewayFormat(config) {
+  return (config?.gatewayFormat ?? process.env.SMPP_GATEWAY_FORMAT ?? "")
     .toString()
     .toLowerCase();
-  return fmt === "kannel";
+}
+
+function useKannelFormat(config) {
+  return gatewayFormat(config) === "kannel";
+}
+
+function useHostPinnacleFormat(config) {
+  return gatewayFormat(config) === "hostpinnacle";
 }
 
 /** Kannel sendsms: GET/POST query username password to from text */
@@ -51,6 +54,57 @@ async function sendSmsKannel(config, { to, body }) {
   return { success: true, externalId: `kannel-${Date.now()}`, response: responseText };
 }
 
+/** HostPinnacle Kenya REST (https://smsportal.hostpinnacle.co.ke/SMSApi/send) */
+async function sendSmsHostPinnacle(config, { to, body }) {
+  const { gatewayUrl, apiKey } = config;
+  const userId = config.kannelUser || process.env.SMPP_KANNEL_USER || "";
+  const password = config.kannelPassword || process.env.SMPP_KANNEL_PASSWORD || "";
+  if (!userId || !password) {
+    throw new Error("HostPinnacle requires SMPP_KANNEL_USER and SMPP_KANNEL_PASSWORD");
+  }
+
+  const mobile = String(Array.isArray(to) ? to[0] : to)
+    .trim()
+    .replace(/^\+/, "");
+  const senderid = config.senderId
+    ? String(config.senderId).replace(/^\+/, "").replace(/\s/g, "")
+    : "";
+
+  const params = new URLSearchParams({
+    userid: userId,
+    password,
+    sendMethod: "quick",
+    mobile,
+    msg: String(body || "").trim(),
+    msgType: "text",
+    output: "json",
+    duplicatecheck: "true",
+  });
+  if (senderid) params.set("senderid", senderid);
+
+  const headers = {
+    "Content-Type": "application/x-www-form-urlencoded",
+    "cache-control": "no-cache",
+  };
+  if (apiKey) headers.apikey = apiKey;
+
+  const res = await fetch(gatewayUrl.replace(/\/$/, ""), {
+    method: "POST",
+    headers,
+    body: params.toString(),
+  });
+  const responseText = await res.text();
+  if (!res.ok) {
+    throw new Error(`HostPinnacle HTTP ${res.status}: ${responseText || res.statusText}`);
+  }
+  let externalId = null;
+  try {
+    const data = JSON.parse(responseText);
+    externalId = data?.messageId ?? data?.id ?? null;
+  } catch (_) {}
+  return { success: true, externalId, response: responseText };
+}
+
 /** Generic gateway: POST JSON { to, body, from } or Kannel query format */
 export async function sendSmsGeneric(config, { to, body }) {
   if (!config) throw new Error("SMS config missing");
@@ -62,6 +116,10 @@ export async function sendSmsGeneric(config, { to, body }) {
 
   if (useKannelFormat(config)) {
     return sendSmsKannel(config, { to, body });
+  }
+
+  if (useHostPinnacleFormat(config)) {
+    return sendSmsHostPinnacle(config, { to, body });
   }
 
   const url = gatewayUrl.replace(/\/$/, "");
@@ -146,6 +204,13 @@ export function validateSmsConfig(config, { allowSimulate = false } = {}) {
   }
   if (useTraccarGateway(merged)) {
     return validateTraccarConfig(merged);
+  }
+  if (useHostPinnacleFormat(merged)) {
+    const user = merged.kannelUser || process.env.SMPP_KANNEL_USER;
+    const pass = merged.kannelPassword || process.env.SMPP_KANNEL_PASSWORD;
+    if (!user || !pass) {
+      return { valid: false, error: "HostPinnacle: set SMPP_KANNEL_USER and SMPP_KANNEL_PASSWORD" };
+    }
   }
   return { valid: true };
 }

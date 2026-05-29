@@ -27,6 +27,16 @@ services:
         sync: false
       - key: GEMINI_API_KEY
         sync: false
+      - key: SMPP_GATEWAY_URL
+        sync: false
+      - key: SMPP_GATEWAY_FORMAT
+        sync: false
+      - key: SMPP_KANNEL_USER
+        sync: false
+      - key: SMPP_KANNEL_PASSWORD
+        sync: false
+      - key: SMPP_GATEWAY_API_KEY
+        sync: false
       - key: SMS_GATEWAY_URL
         sync: false
       - key: SMS_GATEWAY_API_KEY
