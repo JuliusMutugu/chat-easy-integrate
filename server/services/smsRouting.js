@@ -1,18 +1,12 @@
 /**
- * SaaS SMS routing: each tenant has their own registered sender ID.
- *
- * Routes:
- *   registered  – HTTP aggregator with tenant sender_id (unique From line per customer)
- *   dedicated   – Tenant's own Traccar phone/SIM
- *   managed_phone – Shared platform phone (same SIM/From for all; brand prefix only)
+ * Global SMS SaaS — YOU host the gateway on your server.
+ * Customers only get an API key + their originating number (registered on your SMPP bind).
+ * No Traccar, no app on their phone.
  */
 
-import {
-  resolveTenantSender,
-  applySenderToGatewayConfig,
-  applyBrandPrefixToBody,
-  isPhoneSmsGateway,
-} from "./senderId.js";
+import { applySenderToGatewayConfig, isPhoneSmsGateway } from "./senderId.js";
+import { normalizePhoneNumber } from "./traccarSmsGateway.js";
+import { resolveGatewayForRecipient, loadOperatorGateways } from "./operatorGateways.js";
 
 function stripEnvQuotes(val) {
   if (val == null || typeof val !== "string") return val;
@@ -23,107 +17,122 @@ function stripEnvQuotes(val) {
   return s;
 }
 
-/** Platform aggregator for MNO-registered alphanumeric sender IDs (per tenant). */
-export function getAggregatorConfigFromEnv() {
-  const gatewayUrl = process.env.SMS_AGGREGATOR_URL;
-  if (!gatewayUrl) return null;
-  return {
-    gatewayUrl: stripEnvQuotes(String(gatewayUrl)).replace(/\/$/, ""),
-    apiKey: stripEnvQuotes(String(process.env.SMS_AGGREGATOR_API_KEY || "")),
-    method: (process.env.SMS_AGGREGATOR_METHOD || "POST").toUpperCase(),
-    provider: (process.env.SMS_AGGREGATOR_PROVIDER || "aggregator").toLowerCase(),
-  };
+export function isDevSimulateEnabled() {
+  return false;
 }
 
-/**
- * Pick gateway + whether body brand prefix is needed.
- * @returns {{ route: string, config: object, senderMeta: object, useBrandPrefix: boolean, fromLineBehavior: string }}
- */
-export async function resolveSmsDelivery({ fullClient, getPlatformPhoneConfig }) {
-  const senderMeta = resolveTenantSender(fullClient || {});
-
-  if (fullClient?.gatewayConfigured) {
-    const config = applySenderToGatewayConfig(
-      {
-        gatewayUrl: fullClient.gatewayUrl || "",
-        apiKey: fullClient.gatewayApiKey || "",
-        method: (fullClient.gatewayMethod || "POST").toUpperCase(),
-        provider: (fullClient.gatewayProvider || "traccar").toLowerCase(),
-      },
-      fullClient
-    );
-    return {
-      route: "dedicated",
-      config,
-      senderMeta,
-      useBrandPrefix: isPhoneSmsGateway(config),
-      fromLineBehavior: isPhoneSmsGateway(config) ? "dedicated_sim" : "registered",
-    };
+/** Any SMPP gateway configured (single or multi-operator). */
+export function getSmppGatewayConfigFromEnv(to = null) {
+  if (to) {
+    const routed = resolveGatewayForRecipient(to);
+    if (routed) return routed;
   }
+  const all = loadOperatorGateways();
+  return all[0] || null;
+}
 
-  if (fullClient) {
-    const aggregator = getAggregatorConfigFromEnv();
-    if (senderMeta.registeredSenderId && aggregator?.gatewayUrl) {
-      const config = applySenderToGatewayConfig(aggregator, fullClient);
+export const getAggregatorConfigFromEnv = getSmppGatewayConfigFromEnv;
+
+/**
+ * Tenant send: platform-hosted gateway + customer originator_phone as From address.
+ */
+export async function resolveSmsDelivery({ fullClient, getPlatformPhoneConfig, to = null }) {
+  const customerPhone = fullClient?.originatorPhone
+    ? normalizePhoneNumber(fullClient.originatorPhone)
+    : null;
+
+  if (fullClient && customerPhone) {
+    // Real tenant sends ONLY via your SMPP bind with their number as `from`.
+    // Traccar/phone cannot spoof another MSISDN — the SIM in the device IS the sender.
+    const smpp = getSmppGatewayConfigFromEnv(to);
+    if (smpp?.gatewayUrl) {
+      const config = applySenderToGatewayConfig(smpp, {
+        ...fullClient,
+        originatorPhone: customerPhone,
+      });
       return {
-        route: "registered",
+        route: "tenant_smpp",
         config,
-        senderMeta,
+        customerPhone,
+        matchedOperator: smpp.matchedOperator || null,
         useBrandPrefix: false,
-        fromLineBehavior: "registered_sender_id",
+        fromLineBehavior: "customer_phone",
       };
     }
 
-    const phoneConfig = applySenderToGatewayConfig(
-      await getPlatformPhoneConfig(fullClient?.id ?? null),
-      fullClient
-    );
+  }
+
+  if (fullClient) {
     return {
-      route: "managed_phone",
-      config: phoneConfig,
-      senderMeta,
-      useBrandPrefix: true,
-      fromLineBehavior: "shared_sim",
+      route: "not_configured",
+      config: null,
+      customerPhone,
+      useBrandPrefix: false,
+      fromLineBehavior: "not_configured",
     };
   }
 
   const config = await getPlatformPhoneConfig(null);
   return {
-    route: "platform",
+    route: "platform_admin",
     config,
-    senderMeta,
+    customerPhone: null,
     useBrandPrefix: isPhoneSmsGateway(config),
-    fromLineBehavior: isPhoneSmsGateway(config) ? "shared_sim" : "registered",
+    fromLineBehavior: "platform_owner",
   };
 }
 
-export function buildOutboundSmsBody(body, { useBrandPrefix, senderMeta }) {
-  const text = String(body ?? "").trim();
-  if (!useBrandPrefix) return text;
-  return applyBrandPrefixToBody(text, senderMeta.brandSenderName);
+export function buildOutboundSmsBody(body) {
+  return String(body ?? "").trim();
 }
 
-export function describeFromLineForAccount({ fromLineBehavior, senderMeta, route }) {
-  if (fromLineBehavior === "registered_sender_id") {
+export function assertTenantSendsAsCustomer(delivery, fullClient) {
+  if (!fullClient) return;
+
+  if (delivery.route === "tenant_smpp") {
+    return;
+  }
+
+  const phone = fullClient.originatorPhone
+    ? normalizePhoneNumber(fullClient.originatorPhone)
+    : null;
+
+  const err = new Error(
+    phone
+      ? `Cannot send as ${phone} without SMPP_GATEWAY_URL on your server. ` +
+          `A phone on your desk cannot show a different sender — the SIM in the device is what recipients see. ` +
+          `Register ${phone} on your SMPP/MNO bind, then send. No simulate, no borrowed SIMs.`
+      : `Set originator_phone for this tenant (their MSISDN, e.g. +254717348043).`
+  );
+  err.status = 503;
+  err.code = "PLATFORM_GATEWAY_REQUIRED";
+  throw err;
+}
+
+export function describeFromLineForAccount({ fromLineBehavior, customerPhone, fullClient }) {
+  const smppReady = loadOperatorGateways().length > 0;
+
+  if (fromLineBehavior === "customer_phone" && customerPhone) {
     return {
       fromLineBehavior,
-      registeredSenderId: senderMeta.registeredSenderId,
+      originatingPhone: customerPhone,
+      deliveryModel: "platform_smpp",
       senderIdSharedWithOtherTenants: false,
-      note: `Each message uses your registered sender ID "${senderMeta.registeredSenderId}" on the From line.`,
+      canSend: smppReady,
+      note: smppReady
+        ? `SMPP live: recipients see ${customerPhone}. Customer installs nothing.`
+        : `Set SMPP_GATEWAY_URL on your server and register ${customerPhone} with your operator.`,
     };
   }
-  if (fromLineBehavior === "dedicated_sim") {
-    return {
-      fromLineBehavior,
-      registeredSenderId: senderMeta.registeredSenderId,
-      senderIdSharedWithOtherTenants: false,
-      note: "SMS is sent from your dedicated SIM. Recipients see your phone number (or their saved contact name for that number).",
-    };
-  }
+
   return {
-    fromLineBehavior,
-    registeredSenderId: senderMeta.registeredSenderId,
-    senderIdSharedWithOtherTenants: true,
-    note: `Shared phone gateway: all tenants show the same SIM on the From line (e.g. a saved contact name like "wme"). Your brand "${senderMeta.brandSenderName}" appears in the message prefix only. For a unique From line per customer, set SMS_AGGREGATOR_URL (registered sender IDs) or assign a dedicated gateway per tenant.`,
+    fromLineBehavior: "not_configured",
+    originatingPhone: customerPhone || null,
+    deliveryModel: "platform_hosted",
+    senderIdSharedWithOtherTenants: false,
+    canSend: false,
+    note: fullClient?.originatorPhone
+      ? "Configure SMPP_GATEWAY_URL on your server."
+      : "Set originator_phone for this tenant (their MSISDN, e.g. +254717348043).",
   };
 }

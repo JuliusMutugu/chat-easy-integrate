@@ -2,20 +2,23 @@
 /**
  * Register a tenant's own Traccar gateway (their phone/SIM).
  * Usage:
- *   node scripts/set-tenant-gateway.mjs <clientId> <gatewayUrl> <gatewayApiKey>
+ *   node scripts/set-tenant-gateway.mjs <clientId> <gatewayUrl> <gatewayApiKey> <originatorPhone>
  * Example:
- *   node scripts/set-tenant-gateway.mjs src-xxx http://192.168.100.10:8082 their-traccar-token
+ *   node scripts/set-tenant-gateway.mjs src-xxx http://192.168.100.10:8082 token +254713558761
  */
 import "dotenv/config";
-import { initDatabase, updateSmsResellerClientGateway, getSmsResellerClientById } from "../server/database.js";
+import { initDatabase, updateSmsResellerClientGateway } from "../server/database.js";
+import { normalizePhoneNumber } from "../server/services/traccarSmsGateway.js";
 
-const [clientId, gatewayUrl, gatewayApiKey] = process.argv.slice(2);
-if (!clientId || !gatewayUrl || !gatewayApiKey) {
+const [clientId, gatewayUrl, gatewayApiKey, originatorPhoneRaw] = process.argv.slice(2);
+if (!clientId || !gatewayUrl || !gatewayApiKey || !originatorPhoneRaw) {
   console.error(
-    "Usage: node scripts/set-tenant-gateway.mjs <clientId> <gatewayUrl> <gatewayApiKey>"
+    "Usage: node scripts/set-tenant-gateway.mjs <clientId> <gatewayUrl> <gatewayApiKey> <+254...>"
   );
   process.exit(1);
 }
+
+const originatorPhone = normalizePhoneNumber(originatorPhoneRaw);
 
 await initDatabase();
 const client = await updateSmsResellerClientGateway(clientId, {
@@ -23,6 +26,7 @@ const client = await updateSmsResellerClientGateway(clientId, {
   gatewayApiKey,
   gatewayProvider: "traccar",
   gatewayMethod: "POST",
+  originatorPhone,
 });
 
 if (!client) {
@@ -32,6 +36,6 @@ if (!client) {
 
 console.log("✅ Tenant gateway configured");
 console.log("Client:", client.providerName);
+console.log("Originating phone:", client.originatorPhone);
 console.log("Gateway URL:", client.gatewayUrl);
-console.log("Gateway token preview:", client.gatewayApiKeyPreview);
-console.log("\nSMS from this tenant's API key will use ONLY this gateway (their SIM).");
+console.log("\nRecipients see", client.originatorPhone, "— not the platform owner's number.");

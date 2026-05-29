@@ -51,17 +51,19 @@ export function isPhoneSmsGateway(config) {
   return provider === "traccar";
 }
 
-/** Attach tenant sender to gateway config. Aggregator gets registeredSenderId; phone gateway does not. */
+/** SMPP: From = customer's MSISDN. Traccar: SIM is the number (no override). */
 export function applySenderToGatewayConfig(config, smsClient) {
   if (!smsClient) return config;
-  const sender = resolveTenantSender(smsClient);
-  const next = { ...config, brandSenderName: sender.brandSenderName };
+  const next = { ...config };
   if (isPhoneSmsGateway(config)) {
     next.senderId = "";
     return next;
   }
-  if (sender.registeredSenderId) {
-    next.senderId = sender.registeredSenderId;
+  const fromPhone = smsClient.originatorPhone
+    ? String(smsClient.originatorPhone).trim()
+    : null;
+  if (fromPhone) {
+    next.senderId = fromPhone.replace(/\s+/g, "");
   }
   return next;
 }

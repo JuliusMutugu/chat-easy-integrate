@@ -364,6 +364,7 @@ export async function initDatabase() {
         { name: "gateway_method", type: "TEXT DEFAULT 'POST'" },
         { name: "sender_id", type: "TEXT" },
         { name: "brand_sender_name", type: "TEXT" },
+        { name: "originator_phone", type: "TEXT" },
       ];
       for (const { name, type } of tenantGatewayCols) {
         if (!resellerColNames.includes(name)) {
@@ -1401,6 +1402,7 @@ function mapSmsResellerClientRow(row, { includeFullApiKey = false, includeGatewa
     apiKeyPreview: maskApiKey(apiKey),
     senderId: row.sender_id || null,
     brandSenderName: row.brand_sender_name || null,
+    originatorPhone: row.originator_phone || null,
     gatewayUrl: row.gateway_url || null,
     gatewayApiKey: includeGatewaySecrets ? gatewayApiKey : undefined,
     gatewayApiKeyPreview: maskApiKey(gatewayApiKey),
@@ -1423,14 +1425,15 @@ export async function createSmsResellerClient({
   notes = "",
   senderId = null,
   brandSenderName = null,
+  originatorPhone = null,
   createdByUserId = null,
 }) {
   const id = generateResellerClientId();
   const apiKey = generateClientApiKey();
   await db.run(
     `INSERT INTO sms_reseller_clients
-      (id, provider_name, contact_name, contact_email, contact_phone, sell_rate_kes, status, notes, api_key, sender_id, brand_sender_name, created_by_user_id, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+      (id, provider_name, contact_name, contact_email, contact_phone, sell_rate_kes, status, notes, api_key, sender_id, brand_sender_name, originator_phone, created_by_user_id, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
     [
       id,
       providerName,
@@ -1443,6 +1446,7 @@ export async function createSmsResellerClient({
       apiKey,
       senderId || null,
       brandSenderName || null,
+      originatorPhone || null,
       createdByUserId,
     ]
   );
@@ -1493,7 +1497,13 @@ export async function regenerateSmsResellerClientApiKey(id) {
 /** Tenant-owned Traccar gateway (client's phone/SIM — not platform default). */
 export async function updateSmsResellerClientGateway(
   id,
-  { gatewayUrl, gatewayApiKey, gatewayProvider = "traccar", gatewayMethod = "POST" }
+  {
+    gatewayUrl,
+    gatewayApiKey,
+    gatewayProvider = "traccar",
+    gatewayMethod = "POST",
+    originatorPhone = null,
+  }
 ) {
   const existing = await db.get("SELECT id FROM sms_reseller_clients WHERE id = ?", [id]);
   if (!existing) return null;
@@ -1503,6 +1513,7 @@ export async function updateSmsResellerClientGateway(
       gateway_api_key = ?,
       gateway_provider = ?,
       gateway_method = ?,
+      originator_phone = COALESCE(?, originator_phone),
       updated_at = CURRENT_TIMESTAMP
      WHERE id = ?`,
     [
@@ -1510,8 +1521,22 @@ export async function updateSmsResellerClientGateway(
       gatewayApiKey ? String(gatewayApiKey).trim() : null,
       gatewayProvider || "traccar",
       (gatewayMethod || "POST").toUpperCase(),
+      originatorPhone ?? null,
       id,
     ]
+  );
+  return getSmsResellerClientById(id);
+}
+
+export async function updateSmsResellerClientOriginator(id, { originatorPhone }) {
+  const existing = await db.get("SELECT id FROM sms_reseller_clients WHERE id = ?", [id]);
+  if (!existing) return null;
+  await db.run(
+    `UPDATE sms_reseller_clients SET
+      originator_phone = ?,
+      updated_at = CURRENT_TIMESTAMP
+     WHERE id = ?`,
+    [originatorPhone ?? null, id]
   );
   return getSmsResellerClientById(id);
 }

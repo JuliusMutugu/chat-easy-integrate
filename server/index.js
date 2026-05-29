@@ -88,8 +88,10 @@ import {
   resolveSmsDelivery,
   buildOutboundSmsBody,
   describeFromLineForAccount,
-  getAggregatorConfigFromEnv,
+  getSmppGatewayConfigFromEnv,
+  assertTenantSendsAsCustomer,
 } from "./services/smsRouting.js";
+import { loadOperatorGateways } from "./services/operatorGateways.js";
 import { buildPooledSmsConfig } from "./services/smsGatewayPool.js";
 import { sendEmail, validateEmailConfig } from "./channels/email.js";
 import { sendSmsWithConfig, validateSmsConfig } from "./channels/sms.js";
@@ -1327,23 +1329,30 @@ async function handleSmsSend({ to, body, clientId = null, smsClient = null }) {
   const delivery = await resolveSmsDelivery({
     fullClient,
     getPlatformPhoneConfig: getSmsConfig,
+    to,
   });
-  const { route, config, senderMeta, useBrandPrefix, fromLineBehavior } = delivery;
+  const { route, config, fromLineBehavior, customerPhone } = delivery;
+
+  assertTenantSendsAsCustomer(delivery, fullClient);
 
   const valid = validateSmsConfig(config);
   if (!valid.valid) {
     const err = new Error(
       valid.error ||
         (smsClient
-          ? "SMS gateway not ready for this customer. Assign a dedicated phone, SMS_AGGREGATOR_URL for registered sender IDs, or platform SMS_GATEWAY_*"
+          ? "Set SMPP_GATEWAY_URL on your server (your Kannel/MNO bridge). Customer needs no app — only API key."
           : "SMS gateway not configured on provider side")
     );
     err.status = 503;
     throw err;
   }
 
-  const messageBody = buildOutboundSmsBody(String(body).trim(), { useBrandPrefix, senderMeta });
-  const result = await sendSmsWithConfig(config, { to, body: messageBody });
+  const messageBody = buildOutboundSmsBody(String(body).trim());
+  const result = await sendSmsWithConfig(config, {
+    to,
+    body: messageBody,
+    simulateFrom: simulate ? customerPhone : null,
+  });
   const recipientLabel = clientId
     ? `client:${clientId}:${Array.isArray(to) ? to.join(",") : String(to)}`
     : Array.isArray(to) ? to.join(",") : String(to);
@@ -1351,13 +1360,13 @@ async function handleSmsSend({ to, body, clientId = null, smsClient = null }) {
   return {
     ...result,
     route,
-    gatewayUrl: config.gatewayUrl,
-    senderId: senderMeta.registeredSenderId || senderMeta.senderId || null,
-    brandSenderName: senderMeta.brandSenderName || null,
-    registeredSenderId: senderMeta.registeredSenderId || null,
+    gatewayUrl: config?.gatewayUrl || null,
+    originatingPhone: customerPhone || null,
+    customerPhone: customerPhone || null,
     fromLineBehavior,
+    simulated: result.simulated === true,
+    matchedOperator: delivery.matchedOperator || null,
     messagePreview: messageBody.slice(0, 120),
-    senderIdNote: senderMeta.senderIdNote,
   };
 }
 
@@ -1379,31 +1388,29 @@ app.post("/api/channels/sms/send", requireBusinessKycApproved, async (req, res) 
 // Public client API (share with Imara Logic and other buyers)
 app.get("/api/v1/account", requireClientApiKey, (req, res) => {
   const c = req.smsClient;
-  const deliveryMode = c.gatewayConfigured ? "dedicated" : "managed";
-  const sender = resolveTenantSender(c);
-  const aggregatorReady = !!getAggregatorConfigFromEnv()?.gatewayUrl;
+  const customerPhone = c.originatorPhone || null;
+  const smppReady = loadOperatorGateways().length > 0;
+  const fromLineBehavior = customerPhone
+    ? smppReady
+      ? "customer_phone"
+      : "not_configured"
+    : "not_configured";
   const fromLine = describeFromLineForAccount({
-    fromLineBehavior: c.gatewayConfigured
-      ? "dedicated_sim"
-      : sender.registeredSenderId && aggregatorReady
-        ? "registered_sender_id"
-        : "shared_sim",
-    senderMeta: sender,
-    route: deliveryMode,
+    fromLineBehavior,
+    customerPhone,
+    fullClient: c,
   });
   res.json({
     providerName: c.providerName,
     status: c.status,
     sellRateKes: c.sellRateKes,
     currency: "KES",
-    deliveryMode,
-    gatewayConfigured: c.gatewayConfigured,
-    aggregatorConfigured: aggregatorReady,
-    senderId: sender.registeredSenderId || sender.senderId,
-    brandSenderName: sender.brandSenderName,
-    registeredSenderId: sender.registeredSenderId,
+    deliveryMode: "platform_hosted",
+    product: "global_sms_saas",
+    smppGatewayConfigured: smppReady,
+    canSend: fromLine.canSend === true,
+    originatingPhone: fromLine.originatingPhone ?? customerPhone,
     ...fromLine,
-    senderIdNote: sender.senderIdNote,
     note: fromLine.note,
   });
 });
@@ -1430,8 +1437,9 @@ app.post("/api/v1/sms/send", requireClientApiKey, async (req, res) => {
       gatewayUrl: result.gatewayUrl,
       senderId: result.senderId,
       brandSenderName: result.brandSenderName,
-      registeredSenderId: result.registeredSenderId,
-      fromLineBehavior: result.fromLineBehavior,
+    registeredSenderId: result.registeredSenderId,
+    originatingPhone: result.customerPhone,
+    fromLineBehavior: result.fromLineBehavior,
       messagePreview: result.messagePreview,
       senderIdNote: result.senderIdNote,
     });
@@ -1559,10 +1567,18 @@ app.patch("/api/sms-reseller/clients/:id/sender", requireBusinessKycApproved, as
 
 app.patch("/api/sms-reseller/clients/:id/gateway", requireBusinessKycApproved, async (req, res) => {
   try {
-    const { gatewayUrl, gatewayApiKey, gatewayProvider, gatewayMethod } = req.body || {};
+    const { gatewayUrl, gatewayApiKey, gatewayProvider, gatewayMethod, originatorPhone } =
+      req.body || {};
     if (!gatewayUrl || !gatewayApiKey) {
       return res.status(400).json({
-        error: "gatewayUrl and gatewayApiKey are required (client's Traccar phone IP:port and token)",
+        error:
+          "gatewayUrl and gatewayApiKey are required (customer's Traccar on THEIR phone/SIM)",
+      });
+    }
+    if (!originatorPhone) {
+      return res.status(400).json({
+        error:
+          "originatorPhone is required — the customer's SIM number (+254...) that recipients will see",
       });
     }
     const client = await updateSmsResellerClientGateway(req.params.id, {
@@ -1570,12 +1586,13 @@ app.patch("/api/sms-reseller/clients/:id/gateway", requireBusinessKycApproved, a
       gatewayApiKey,
       gatewayProvider,
       gatewayMethod,
+      originatorPhone,
     });
     if (!client) return res.status(404).json({ error: "Client not found" });
     res.json({
       ...client,
       message:
-        "Dedicated gateway assigned for this customer (admin-managed). Their API sends use this phone/SIM.",
+        "Customer gateway assigned. API sends route to their Traccar — messages leave from their SIM number, not yours.",
     });
   } catch (err) {
     console.error("Update tenant gateway error:", err);

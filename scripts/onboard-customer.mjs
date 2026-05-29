@@ -1,89 +1,59 @@
 #!/usr/bin/env node
 /**
- * Onboard a new SMS SaaS customer (unique registered sender ID per tenant).
+ * Onboard tenant — customer only needs API key + their phone number.
+ * YOU host the SMS gateway on your server (SMPP). No Traccar on their phone.
  *
  * Usage:
- *   node scripts/onboard-customer.mjs "Imara Logic" tech@imaralogic.co.ke \
- *     --registered ImaraLogic --brand ImaraLogicSystems
- *
- * Optional dedicated phone:
- *   ... --gateway http://192.168.100.10:8082 --token THEIR_TRACCAR_TOKEN
+ *   node scripts/onboard-customer.mjs "Acme Ltd" billing@acme.com --phone 254717348043
  */
 import "dotenv/config";
 import {
   initDatabase,
   createSmsResellerClient,
-  updateSmsResellerClientGateway,
+  getSmsResellerClientById,
 } from "../server/database.js";
-import { resolveTenantSender } from "../server/services/senderId.js";
+import { normalizePhoneNumber } from "../server/services/traccarSmsGateway.js";
 
 const args = process.argv.slice(2);
 const providerName = args[0];
 const contactEmail = args[1] && !args[1].startsWith("--") ? args[1] : null;
 
-let gatewayUrl = null;
-let gatewayToken = null;
-let registered = null;
-let brand = null;
+let phone = null;
 for (let i = 0; i < args.length; i++) {
-  if (args[i] === "--gateway" && args[i + 1]) gatewayUrl = args[++i];
-  if (args[i] === "--token" && args[i + 1]) gatewayToken = args[++i];
-  if ((args[i] === "--registered" || args[i] === "--sender") && args[i + 1]) {
-    registered = args[++i];
-  }
-  if ((args[i] === "--brand" || args[i] === "--brand-name") && args[i + 1]) {
-    brand = args[++i];
+  if ((args[i] === "--phone" || args[i] === "--originator") && args[i + 1]) {
+    phone = normalizePhoneNumber(args[++i]);
   }
 }
 
-if (!providerName || !registered) {
+if (!providerName || !phone) {
   console.error(
-    'Usage: node scripts/onboard-customer.mjs "Company" [email] --registered SenderID [--brand LongBrandName]'
+    'Usage: node scripts/onboard-customer.mjs "Company Name" [email] --phone 2547XXXXXXXX\n' +
+      "Customer installs nothing. You set SMPP_GATEWAY_URL on your server."
   );
   process.exit(1);
 }
 
 await initDatabase();
 
-const sender = resolveTenantSender({
-  senderId: registered,
-  brandSenderName: brand || registered,
-  providerName,
-});
-
-if (!sender.registeredSenderId) {
-  console.error("Invalid --registered (max 11 characters after normalization)");
-  process.exit(1);
-}
-
 const client = await createSmsResellerClient({
   providerName,
   contactEmail,
+  contactPhone: phone,
+  originatorPhone: phone,
   sellRateKes: Number(process.env.SMS_SELL_RATE_KES) || 0.3,
   status: "active",
-  notes: "Onboarded via onboard-customer script",
-  senderId: sender.registeredSenderId,
-  brandSenderName: sender.brandSenderName,
+  notes: "Platform-hosted gateway; customer MSISDN as From address",
 });
 
-let final = client;
-if (gatewayUrl && gatewayToken) {
-  final = await updateSmsResellerClientGateway(client.id, {
-    gatewayUrl,
-    gatewayApiKey: gatewayToken,
-  });
-}
+const final = await getSmsResellerClientById(client.id, { includeFullApiKey: true });
 
-const base = process.env.SERVER_URL || "http://localhost:3000";
-const mode = final.gatewayConfigured ? "dedicated" : "managed";
-
-console.log("\n✅ Customer onboarded (SaaS sender)\n");
-console.log("Company:              ", final.providerName);
-console.log("Client ID:            ", final.id);
-console.log("Registered sender ID: ", sender.registeredSenderId);
-console.log("Brand:                ", sender.brandSenderName);
-console.log("Delivery:             ", mode);
+console.log("\n✅ Tenant onboarded (no app on their phone)\n");
+console.log("Company:           ", final.providerName);
+console.log("Their number (From):", phone);
+console.log("Client ID:         ", final.id);
+console.log("\n🔑 API KEY (give customer once):\n", final.apiKey);
+console.log("\nYour server needs: SMPP_GATEWAY_URL (production)");
+console.log("Dev test only:     SMS_DEV_SIMULATE=1 in .env\n");
 console.log(
-  "\nFor unique From line (not shared SIM): set SMS_AGGREGATOR_URL on server or assign --gateway per tenant.\n"
+  `SMS_TEST_API_KEY=${final.apiKey} SERVER_URL=http://localhost:3001 node scripts/test-e2e-sms.mjs 0713558761`
 );
-console.log("🔑 API KEY:\n", final.apiKey);
