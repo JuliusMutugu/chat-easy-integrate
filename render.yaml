@@ -21,6 +21,10 @@ services:
         generateValue: true
       - key: DATABASE_PATH
         value: ./server/messaging.db
+      - key: SMS_BOOTSTRAP_ORIGINATOR_PHONE
+        value: "254717348043"
+      - key: SMS_BOOTSTRAP_TENANT_NAME
+        value: "Tenant 0717348043"
       - key: SERVER_URL
         sync: false
       - key: CLIENT_URL

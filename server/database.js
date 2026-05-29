@@ -1,6 +1,7 @@
 import sqlite3 from "sqlite3";
 import { open } from "sqlite";
 import path from "path";
+import fs from "fs";
 import crypto from "crypto";
 import { fileURLToPath } from "url";
 
@@ -10,10 +11,44 @@ const __dirname = path.dirname(__filename);
 // Database connection
 let db = null;
 
+/** Same path for SQLite app data and express-session store (must match DATABASE_PATH on Render). */
+export function resolveDatabasePath() {
+  const envPath = process.env.DATABASE_PATH?.trim();
+  if (!envPath) return path.join(__dirname, "messaging.db");
+  return path.isAbsolute(envPath) ? envPath : path.resolve(process.cwd(), envPath);
+}
+
+function ensureDatabaseDirectory(filePath) {
+  const dir = path.dirname(filePath);
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    return true;
+  } catch (err) {
+    console.error(`[db] Cannot create directory ${dir}:`, err.message);
+    return false;
+  }
+}
+
+/** Create parent dir; fall back off /data when no Render disk is mounted. */
+export function prepareDatabasePath() {
+  let filename = resolveDatabasePath();
+  if (!ensureDatabaseDirectory(filename) && filename.startsWith("/data")) {
+    console.warn(
+      "[db] /data not writable (add a Render Disk or set DATABASE_PATH=./server/messaging.db) — using ./server/messaging.db"
+    );
+    filename = path.join(__dirname, "messaging.db");
+    process.env.DATABASE_PATH = filename;
+    ensureDatabaseDirectory(filename);
+  }
+  return filename;
+}
+
 export async function initDatabase() {
   try {
+    const filename = prepareDatabasePath();
+
     db = await open({
-      filename: path.join(__dirname, "messaging.db"),
+      filename,
       driver: sqlite3.Database,
     });
 

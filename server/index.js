@@ -75,6 +75,7 @@ import {
   getNurtureTemplatesByUserId,
   deleteNurtureTemplate,
   createSmsResellerClient,
+  prepareDatabasePath,
   listSmsResellerClients,
   getSmsResellerClientById,
   getSmsResellerClientByApiKey,
@@ -101,13 +102,15 @@ import { GoogleGenAI } from "@google/genai";
 const app = express();
 const server = createServer(app);
 
+const databaseFile = prepareDatabasePath();
+
 // Session store for socket.io to share sessions with Express
 // Use SQLite for session storage in production (persistent sessions)
 const SQLiteStore = connectSqlite3(session);
 
 const sessionMiddleware = session({
   store: new SQLiteStore({
-    db: process.env.DATABASE_PATH || "./server/messaging.db",
+    db: databaseFile,
     table: "sessions",
   }),
   secret: process.env.SESSION_SECRET || "nego-secret-change-in-production",
@@ -183,6 +186,25 @@ io.engine.use((req, res, next) => {
 
 // Initialize database
 await initDatabase();
+
+const bootstrapPhone = process.env.SMS_BOOTSTRAP_ORIGINATOR_PHONE?.trim();
+if (bootstrapPhone) {
+  const { normalizePhoneNumber } = await import("./services/traccarSmsGateway.js");
+  const phone = normalizePhoneNumber(bootstrapPhone);
+  const clients = await listSmsResellerClients();
+  if (!clients.some((c) => c.originatorPhone === phone)) {
+    const created = await createSmsResellerClient({
+      providerName: process.env.SMS_BOOTSTRAP_TENANT_NAME || `Tenant ${phone}`,
+      originatorPhone: phone,
+      contactPhone: phone,
+      sellRateKes: Number(process.env.SMS_SELL_RATE_KES) || 0.3,
+      status: "active",
+      notes: "Auto-created on deploy (SMS_BOOTSTRAP_ORIGINATOR_PHONE)",
+    });
+    const full = await getSmsResellerClientById(created.id, { includeFullApiKey: true });
+    console.log("[bootstrap] Tenant", phone, "API key:", full?.apiKey);
+  }
+}
 
 // Uploads directory for documents
 const uploadsDir = path.join(__dirname, "uploads");
