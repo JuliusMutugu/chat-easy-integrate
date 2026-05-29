@@ -1375,7 +1375,7 @@ async function handleSmsSend({ to, body, clientId = null, smsClient = null }) {
   const result = await sendSmsWithConfig(config, {
     to,
     body: messageBody,
-    simulateFrom: simulate ? customerPhone : null,
+    simulateFrom: null,
   });
   const recipientLabel = clientId
     ? `client:${clientId}:${Array.isArray(to) ? to.join(",") : String(to)}`
