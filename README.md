@@ -194,8 +194,12 @@ See **[Competitive Strategy](docs/COMPETITIVE_STRATEGY.md)** for positioning and
 
 For production launch prep as an SMS-selling business, use **[SMS Seller Readiness](docs/SMS_SELLER_READINESS.md)**.
 
+For hosting and onboarding your first customer, see **[Hosting & First Customer](docs/HOSTING_AND_FIRST_CUSTOMER.md)**.
+
 For sales and onboarding assets, use:
+- **[Cheap SMS Reseller (Kenya)](docs/SMS_CHEAP_RESELLER_KENYA.md)** — Traccar phone pool, 30-min launch, tier pricing
 - **[Client Proposal (Imara Logic)](docs/SMS_CLIENT_PROPOSAL_IMARALOGIC.md)**
+- **[SMS API Integration Guide (share with clients)](docs/SMS_CLIENT_API_INTEGRATION.md)**
 - **[SMS Reseller API Spec](docs/SMS_RESELLER_API_SPEC.md)**
 - **[SMS Profit Calculator (Kenya)](docs/SMS_PROFIT_CALCULATOR_KENYA.md)**
 - **[SMS Outreach Template](docs/SMS_OUTREACH_TEMPLATE.md)**

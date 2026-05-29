@@ -77,8 +77,20 @@ import {
   createSmsResellerClient,
   listSmsResellerClients,
   getSmsResellerClientById,
+  getSmsResellerClientByApiKey,
+  regenerateSmsResellerClientApiKey,
+  updateSmsResellerClientGateway,
+  updateSmsResellerClientSender,
   createSmsResellerQuote,
 } from "./database.js";
+import { resolveTenantSender } from "./services/senderId.js";
+import {
+  resolveSmsDelivery,
+  buildOutboundSmsBody,
+  describeFromLineForAccount,
+  getAggregatorConfigFromEnv,
+} from "./services/smsRouting.js";
+import { buildPooledSmsConfig } from "./services/smsGatewayPool.js";
 import { sendEmail, validateEmailConfig } from "./channels/email.js";
 import { sendSmsWithConfig, validateSmsConfig } from "./channels/sms.js";
 import { sendWhatsApp, sendWhatsAppDev, validateWhatsAppConfig } from "./channels/whatsapp.js";
@@ -310,6 +322,36 @@ function requireAuth(req, res, next) {
 function getDefaultSmsSellRate() {
   const val = Number(process.env.SMS_SELL_RATE_KES ?? "0.30");
   return Number.isFinite(val) && val > 0 ? val : 0.30;
+}
+
+/** Client API key auth for /api/v1/* (Imara Logic and other buyers) */
+async function requireClientApiKey(req, res, next) {
+  try {
+    let apiKey = null;
+    const auth = req.headers.authorization;
+    if (auth && typeof auth === "string" && auth.toLowerCase().startsWith("bearer ")) {
+      apiKey = auth.slice(7).trim();
+    } else if (req.headers["x-api-key"]) {
+      apiKey = String(req.headers["x-api-key"]).trim();
+    }
+    if (!apiKey) {
+      return res.status(401).json({
+        error: "API key required. Use Authorization: Bearer <api_key> or X-API-Key header.",
+      });
+    }
+    const client = await getSmsResellerClientByApiKey(apiKey);
+    if (!client) {
+      return res.status(401).json({ error: "Invalid API key" });
+    }
+    if (client.status !== "active") {
+      return res.status(403).json({ error: "Client account is suspended or inactive" });
+    }
+    req.smsClient = client;
+    next();
+  } catch (err) {
+    console.error("Client API key auth error:", err);
+    res.status(500).json({ error: "Authentication failed" });
+  }
 }
 
 async function requireBusinessKycApproved(req, res, next) {
@@ -1187,23 +1229,38 @@ async function getEmailConfig() {
   return merged;
 }
 
-/** SMS config: DB (Integrations) merged with .env SMS_GATEWAY_*; env values are quote-stripped. */
-async function getSmsConfig() {
+/** SMS config: DB (Integrations) merged with pool or .env SMS_GATEWAY_*; env values are quote-stripped. */
+async function getSmsConfig(tenantClientId = null) {
   const fromDb = (await getChannelConfig("sms"))?.config || {};
   const merged = { ...fromDb };
-  const gatewayUrl = process.env.SMS_GATEWAY_URL;
-  const gatewayApiKey = process.env.SMS_GATEWAY_API_KEY;
+
+  const pooled = buildPooledSmsConfig(tenantClientId, merged);
+  if (pooled) {
+    Object.assign(merged, pooled);
+  } else {
+    const gatewayUrl = process.env.SMS_GATEWAY_URL;
+    const gatewayApiKey = process.env.SMS_GATEWAY_API_KEY;
+    if (gatewayUrl) {
+      merged.gatewayUrl = stripEnvQuotes(String(gatewayUrl));
+    }
+    if (gatewayApiKey) {
+      merged.apiKey = stripEnvQuotes(String(gatewayApiKey));
+    }
+  }
+
   const gatewayMethod = process.env.SMS_GATEWAY_METHOD;
-  if (gatewayUrl) {
-    merged.gatewayUrl = stripEnvQuotes(String(gatewayUrl));
-  }
-  if (gatewayApiKey) {
-    merged.apiKey = stripEnvQuotes(String(gatewayApiKey));
-  }
+  const gatewayProvider = process.env.SMS_GATEWAY_PROVIDER;
   if (gatewayMethod) {
     merged.method = stripEnvQuotes(String(gatewayMethod)).toUpperCase();
   }
+  if (gatewayProvider) {
+    merged.provider = stripEnvQuotes(String(gatewayProvider)).toLowerCase();
+  }
   return merged;
+}
+
+async function loadSmsClientForSend(clientSummary) {
+  return getSmsResellerClientById(clientSummary.id, { includeGatewaySecrets: true });
 }
 
 const CHANNEL_NAMES = ["email", "sms", "whatsapp", "identity", "payments"];
@@ -1254,26 +1311,133 @@ app.post("/api/channels/email/send", requireAuth, async (req, res) => {
   }
 });
 
+async function handleSmsSend({ to, body, clientId = null, smsClient = null }) {
+  if (!to) {
+    const err = new Error("to is required");
+    err.status = 400;
+    throw err;
+  }
+  if (!body || !String(body).trim()) {
+    const err = new Error("body is required");
+    err.status = 400;
+    throw err;
+  }
+
+  const fullClient = smsClient ? await loadSmsClientForSend(smsClient) : null;
+  const delivery = await resolveSmsDelivery({
+    fullClient,
+    getPlatformPhoneConfig: getSmsConfig,
+  });
+  const { route, config, senderMeta, useBrandPrefix, fromLineBehavior } = delivery;
+
+  const valid = validateSmsConfig(config);
+  if (!valid.valid) {
+    const err = new Error(
+      valid.error ||
+        (smsClient
+          ? "SMS gateway not ready for this customer. Assign a dedicated phone, SMS_AGGREGATOR_URL for registered sender IDs, or platform SMS_GATEWAY_*"
+          : "SMS gateway not configured on provider side")
+    );
+    err.status = 503;
+    throw err;
+  }
+
+  const messageBody = buildOutboundSmsBody(String(body).trim(), { useBrandPrefix, senderMeta });
+  const result = await sendSmsWithConfig(config, { to, body: messageBody });
+  const recipientLabel = clientId
+    ? `client:${clientId}:${Array.isArray(to) ? to.join(",") : String(to)}`
+    : Array.isArray(to) ? to.join(",") : String(to);
+  await saveOutboundMessage("sms", recipientLabel, String(body).trim(), "sent", result.externalId);
+  return {
+    ...result,
+    route,
+    gatewayUrl: config.gatewayUrl,
+    senderId: senderMeta.registeredSenderId || senderMeta.senderId || null,
+    brandSenderName: senderMeta.brandSenderName || null,
+    registeredSenderId: senderMeta.registeredSenderId || null,
+    fromLineBehavior,
+    messagePreview: messageBody.slice(0, 120),
+    senderIdNote: senderMeta.senderIdNote,
+  };
+}
+
 app.post("/api/channels/sms/send", requireBusinessKycApproved, async (req, res) => {
   try {
     const { to, body } = req.body || {};
-    if (!to) return res.status(400).json({ error: "to is required" });
-    if (!body || !String(body).trim()) {
-      return res.status(400).json({ error: "body is required" });
-    }
-    const config = await getSmsConfig();
-    const valid = validateSmsConfig(config);
-    if (!valid.valid) {
-      return res.status(400).json({ error: valid.error || "SMS not configured. Set SMS gateway URL in Integrations or SMS_GATEWAY_URL in .env" });
-    }
-    const result = await sendSmsWithConfig(config, { to, body: String(body).trim() });
-    await saveOutboundMessage("sms", Array.isArray(to) ? to.join(",") : String(to), body || "", "sent", result.externalId);
+    const result = await handleSmsSend({ to, body });
     const json = { success: true, externalId: result.externalId };
+    if (result.sent != null) json.sent = result.sent;
+    if (result.failed != null) json.failed = result.failed;
     if (result.recipientStatus) json.recipientStatus = result.recipientStatus;
     res.json(json);
   } catch (err) {
     console.error("Error sending SMS:", err);
-    res.status(500).json({ error: err.message || "Failed to send SMS" });
+    res.status(err.status || 500).json({ error: err.message || "Failed to send SMS" });
+  }
+});
+
+// Public client API (share with Imara Logic and other buyers)
+app.get("/api/v1/account", requireClientApiKey, (req, res) => {
+  const c = req.smsClient;
+  const deliveryMode = c.gatewayConfigured ? "dedicated" : "managed";
+  const sender = resolveTenantSender(c);
+  const aggregatorReady = !!getAggregatorConfigFromEnv()?.gatewayUrl;
+  const fromLine = describeFromLineForAccount({
+    fromLineBehavior: c.gatewayConfigured
+      ? "dedicated_sim"
+      : sender.registeredSenderId && aggregatorReady
+        ? "registered_sender_id"
+        : "shared_sim",
+    senderMeta: sender,
+    route: deliveryMode,
+  });
+  res.json({
+    providerName: c.providerName,
+    status: c.status,
+    sellRateKes: c.sellRateKes,
+    currency: "KES",
+    deliveryMode,
+    gatewayConfigured: c.gatewayConfigured,
+    aggregatorConfigured: aggregatorReady,
+    senderId: sender.registeredSenderId || sender.senderId,
+    brandSenderName: sender.brandSenderName,
+    registeredSenderId: sender.registeredSenderId,
+    ...fromLine,
+    senderIdNote: sender.senderIdNote,
+    note: fromLine.note,
+  });
+});
+
+app.post("/api/v1/sms/send", requireClientApiKey, async (req, res) => {
+  try {
+    const { to, body, message } = req.body || {};
+    const text = body ?? message;
+    const fullClient = await loadSmsClientForSend(req.smsClient);
+    const result = await handleSmsSend({
+      to,
+      body: text,
+      clientId: fullClient.id,
+      smsClient: fullClient,
+    });
+    res.json({
+      success: result.success !== false,
+      externalId: result.externalId,
+      sent: result.sent ?? 1,
+      failed: result.failed ?? 0,
+      clientId: req.smsClient.id,
+      providerName: req.smsClient.providerName,
+      route: result.route,
+      gatewayUrl: result.gatewayUrl,
+      senderId: result.senderId,
+      brandSenderName: result.brandSenderName,
+      registeredSenderId: result.registeredSenderId,
+      fromLineBehavior: result.fromLineBehavior,
+      messagePreview: result.messagePreview,
+      senderIdNote: result.senderIdNote,
+    });
+  } catch (err) {
+    console.error("Client API SMS send error:", err);
+    res.status(err.status || 500).json({ error: err.message || "Failed to send SMS" });
   }
 });
 
@@ -1313,6 +1477,8 @@ app.post("/api/sms-reseller/clients", requireBusinessKycApproved, async (req, re
       sellRateKes = getDefaultSmsSellRate(),
       status = "active",
       notes = "",
+      senderId,
+      brandSenderName,
     } = req.body || {};
 
     if (!providerName || typeof providerName !== "string" || !providerName.trim()) {
@@ -1323,6 +1489,19 @@ app.post("/api/sms-reseller/clients", requireBusinessKycApproved, async (req, re
       return res.status(400).json({ error: "sellRateKes must be a positive number" });
     }
 
+    const sender = resolveTenantSender({
+      senderId,
+      brandSenderName,
+      providerName: providerName.trim(),
+    });
+
+    if (!sender.registeredSenderId) {
+      return res.status(400).json({
+        error:
+          "senderId is required: each SaaS customer needs a unique registered sender ID (max 11 characters, e.g. ImaraLogic, ACMEAlerts).",
+      });
+    }
+
     const client = await createSmsResellerClient({
       providerName: providerName.trim(),
       contactName,
@@ -1331,12 +1510,90 @@ app.post("/api/sms-reseller/clients", requireBusinessKycApproved, async (req, re
       sellRateKes: rate,
       status,
       notes,
+      senderId: sender.registeredSenderId,
+      brandSenderName: sender.brandSenderName,
       createdByUserId: req.session.userId,
     });
-    res.json(client);
+    res.json({
+      ...client,
+      deliveryMode: "managed",
+      senderId: sender.senderId,
+      brandSenderName: sender.brandSenderName,
+      senderIdNote: sender.senderIdNote,
+      message:
+        "Customer created. Share apiKey + your public API URL. You manage the SMS gateway for them unless you assign a dedicated gateway later.",
+    });
   } catch (err) {
     console.error("Create reseller client error:", err);
     res.status(500).json({ error: err.message || "Failed to create reseller client" });
+  }
+});
+
+app.patch("/api/sms-reseller/clients/:id/sender", requireBusinessKycApproved, async (req, res) => {
+  try {
+    const { senderId, brandSenderName } = req.body || {};
+    const existing = await getSmsResellerClientById(req.params.id);
+    if (!existing) return res.status(404).json({ error: "Client not found" });
+
+    const sender = resolveTenantSender({
+      senderId: senderId ?? existing.senderId,
+      brandSenderName: brandSenderName ?? existing.brandSenderName,
+      providerName: existing.providerName,
+    });
+
+    const client = await updateSmsResellerClientSender(req.params.id, {
+      senderId: sender.registeredSenderId,
+      brandSenderName: sender.brandSenderName,
+    });
+    res.json({
+      ...client,
+      senderId: sender.senderId,
+      brandSenderName: sender.brandSenderName,
+      senderIdNote: sender.senderIdNote,
+    });
+  } catch (err) {
+    console.error("Update tenant sender error:", err);
+    res.status(500).json({ error: err.message || "Failed to update sender" });
+  }
+});
+
+app.patch("/api/sms-reseller/clients/:id/gateway", requireBusinessKycApproved, async (req, res) => {
+  try {
+    const { gatewayUrl, gatewayApiKey, gatewayProvider, gatewayMethod } = req.body || {};
+    if (!gatewayUrl || !gatewayApiKey) {
+      return res.status(400).json({
+        error: "gatewayUrl and gatewayApiKey are required (client's Traccar phone IP:port and token)",
+      });
+    }
+    const client = await updateSmsResellerClientGateway(req.params.id, {
+      gatewayUrl,
+      gatewayApiKey,
+      gatewayProvider,
+      gatewayMethod,
+    });
+    if (!client) return res.status(404).json({ error: "Client not found" });
+    res.json({
+      ...client,
+      message:
+        "Dedicated gateway assigned for this customer (admin-managed). Their API sends use this phone/SIM.",
+    });
+  } catch (err) {
+    console.error("Update tenant gateway error:", err);
+    res.status(500).json({ error: err.message || "Failed to update tenant gateway" });
+  }
+});
+
+app.post("/api/sms-reseller/clients/:id/regenerate-key", requireBusinessKycApproved, async (req, res) => {
+  try {
+    const client = await regenerateSmsResellerClientApiKey(req.params.id);
+    if (!client) return res.status(404).json({ error: "Client not found" });
+    res.json({
+      ...client,
+      message: "New API key generated. Previous key is invalidated immediately.",
+    });
+  } catch (err) {
+    console.error("Regenerate client API key error:", err);
+    res.status(500).json({ error: err.message || "Failed to regenerate API key" });
   }
 });
 
