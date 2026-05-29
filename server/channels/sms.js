@@ -1,15 +1,27 @@
 /**
- * SMS channel – provider-agnostic gateway only.
- * Configure your own SMPP/HTTP route in config: { gatewayUrl, apiKey?, method? }.
+ * SMS channel – Traccar Android gateway (default) or generic HTTP gateway.
  */
 
-/** Send via generic gateway (POST { to, body }) */
-export async function sendSms(config, { to, body }) {
+import {
+  getTraccarConfig,
+  sendTraccarSmsQueued,
+  validateTraccarConfig,
+} from "../services/traccarSmsGateway.js";
+
+function useTraccarGateway(config) {
+  const provider = (config?.provider ?? process.env.SMS_GATEWAY_PROVIDER ?? "traccar")
+    .toString()
+    .toLowerCase();
+  return provider === "traccar";
+}
+
+/** Generic gateway: POST { to, body } with optional Bearer token */
+export async function sendSmsGeneric(config, { to, body }) {
   if (!config) throw new Error("SMS config missing");
   const { gatewayUrl, apiKey, method = "POST" } = config;
 
   if (!gatewayUrl || typeof gatewayUrl !== "string") {
-    throw new Error("SMS config missing gatewayUrl. Set your own gateway (e.g. SMPP/HTTP service).");
+    throw new Error("SMS config missing gatewayUrl.");
   }
 
   const url = gatewayUrl.replace(/\/$/, "");
@@ -17,10 +29,16 @@ export async function sendSms(config, { to, body }) {
   if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
 
   const toStr = Array.isArray(to) ? to.join(",") : String(to).trim();
+  const payload = { to: toStr, body: String(body || "").trim() };
+  if (config.senderId) {
+    payload.from = config.senderId;
+    payload.sender = config.senderId;
+    payload.senderId = config.senderId;
+  }
   const res = await fetch(url, {
     method,
     headers,
-    body: JSON.stringify({ to: toStr, body: String(body || "").trim() }),
+    body: JSON.stringify(payload),
   });
 
   if (!res.ok) {
@@ -37,23 +55,36 @@ export async function sendSms(config, { to, body }) {
   return { success: true, externalId };
 }
 
-/** Send SMS through your gateway, else dev stub */
+/** Send SMS through configured gateway (queued for Traccar) */
 export async function sendSmsWithConfig(config, { to, body }) {
-  if (config?.gatewayUrl) {
-    return sendSms(config, { to, body });
+  const merged = { ...getTraccarConfig(), ...(config || {}) };
+
+  if (merged.gatewayUrl && useTraccarGateway(merged)) {
+    return sendTraccarSmsQueued(merged, { to, body });
   }
+
+  if (merged.gatewayUrl) {
+    return sendSmsGeneric(merged, { to, body });
+  }
+
   return sendSmsDev(null, { to, body });
 }
 
 /** Development stub: no config → log only */
 export async function sendSmsDev(config, { to, body }) {
-  if (config && config.gatewayUrl) return sendSms(config, { to, body });
+  const merged = { ...getTraccarConfig(), ...(config || {}) };
+  if (merged.gatewayUrl) return sendSmsWithConfig(merged, { to, body });
   console.log("[SMS dev] to=%s body=%s", to, body);
   return { success: true, externalId: `dev-${Date.now()}` };
 }
 
 export function validateSmsConfig(config) {
-  if (!config) return { valid: false, error: "No config" };
-  if (!config.gatewayUrl) return { valid: false, error: "Missing gatewayUrl for your SMS route" };
+  const merged = { ...getTraccarConfig(), ...(config || {}) };
+  if (!merged.gatewayUrl) {
+    return { valid: false, error: "Missing gatewayUrl (SMS_GATEWAY_URL)" };
+  }
+  if (useTraccarGateway(merged)) {
+    return validateTraccarConfig(merged);
+  }
   return { valid: true };
 }

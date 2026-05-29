@@ -24,6 +24,7 @@
     "express-session": "^1.19.0",
     "multer": "^2.0.2",
     "nodemailer": "^6.9.16",
+    "p-queue": "^8.1.1",
     "pdf-parse": "^1.1.4",
     "socket.io": "^4.7.2",
     "sqlite": "^5.1.1",

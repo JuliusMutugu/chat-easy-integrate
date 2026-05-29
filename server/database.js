@@ -345,6 +345,33 @@ export async function initDatabase() {
       CREATE INDEX IF NOT EXISTS idx_sms_reseller_quotes_client ON sms_reseller_quotes (client_id);
     `);
 
+    const resellerTable = await db.get(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='sms_reseller_clients'"
+    );
+    if (resellerTable) {
+      const resellerCols = await db.all("PRAGMA table_info(sms_reseller_clients)");
+      const resellerColNames = resellerCols.map((c) => c.name);
+      if (!resellerColNames.includes("api_key")) {
+        await db.run("ALTER TABLE sms_reseller_clients ADD COLUMN api_key TEXT");
+        await db.exec(
+          "CREATE UNIQUE INDEX IF NOT EXISTS idx_sms_reseller_api_key ON sms_reseller_clients (api_key)"
+        );
+      }
+      const tenantGatewayCols = [
+        { name: "gateway_url", type: "TEXT" },
+        { name: "gateway_api_key", type: "TEXT" },
+        { name: "gateway_provider", type: "TEXT DEFAULT 'traccar'" },
+        { name: "gateway_method", type: "TEXT DEFAULT 'POST'" },
+        { name: "sender_id", type: "TEXT" },
+        { name: "brand_sender_name", type: "TEXT" },
+      ];
+      for (const { name, type } of tenantGatewayCols) {
+        if (!resellerColNames.includes(name)) {
+          await db.run(`ALTER TABLE sms_reseller_clients ADD COLUMN ${name} ${type}`);
+        }
+      }
+    }
+
     console.log("✅ Database initialized successfully");
     return db;
   } catch (error) {
@@ -1346,39 +1373,21 @@ function generateResellerQuoteId() {
   return "srq-" + Date.now() + "-" + Math.random().toString(36).slice(2, 9);
 }
 
-export async function createSmsResellerClient({
-  providerName,
-  contactName,
-  contactEmail,
-  contactPhone,
-  sellRateKes = 0.30,
-  status = "active",
-  notes = "",
-  createdByUserId = null,
-}) {
-  const id = generateResellerClientId();
-  await db.run(
-    `INSERT INTO sms_reseller_clients
-      (id, provider_name, contact_name, contact_email, contact_phone, sell_rate_kes, status, notes, created_by_user_id, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
-    [
-      id,
-      providerName,
-      contactName || null,
-      contactEmail || null,
-      contactPhone || null,
-      Number(sellRateKes),
-      status || "active",
-      notes || "",
-      createdByUserId,
-    ]
-  );
-  return getSmsResellerClientById(id);
+function generateClientApiKey() {
+  return "sms_live_" + crypto.randomBytes(24).toString("hex");
 }
 
-export async function getSmsResellerClientById(id) {
-  const row = await db.get("SELECT * FROM sms_reseller_clients WHERE id = ?", [id]);
+function maskApiKey(apiKey) {
+  if (!apiKey) return null;
+  const s = String(apiKey);
+  if (s.length <= 8) return "****";
+  return `${s.slice(0, 8)}...${s.slice(-4)}`;
+}
+
+function mapSmsResellerClientRow(row, { includeFullApiKey = false, includeGatewaySecrets = false } = {}) {
   if (!row) return null;
+  const apiKey = row.api_key || null;
+  const gatewayApiKey = row.gateway_api_key || null;
   return {
     id: row.id,
     providerName: row.provider_name,
@@ -1388,27 +1397,128 @@ export async function getSmsResellerClientById(id) {
     sellRateKes: Number(row.sell_rate_kes),
     status: row.status,
     notes: row.notes || "",
+    apiKey: includeFullApiKey ? apiKey : undefined,
+    apiKeyPreview: maskApiKey(apiKey),
+    senderId: row.sender_id || null,
+    brandSenderName: row.brand_sender_name || null,
+    gatewayUrl: row.gateway_url || null,
+    gatewayApiKey: includeGatewaySecrets ? gatewayApiKey : undefined,
+    gatewayApiKeyPreview: maskApiKey(gatewayApiKey),
+    gatewayProvider: row.gateway_provider || "traccar",
+    gatewayMethod: row.gateway_method || "POST",
+    gatewayConfigured: !!(row.gateway_url && row.gateway_api_key),
     createdByUserId: row.created_by_user_id,
     createdAt: row.created_at ? new Date(row.created_at) : null,
     updatedAt: row.updated_at ? new Date(row.updated_at) : null,
   };
 }
 
+export async function createSmsResellerClient({
+  providerName,
+  contactName,
+  contactEmail,
+  contactPhone,
+  sellRateKes = 0.30,
+  status = "active",
+  notes = "",
+  senderId = null,
+  brandSenderName = null,
+  createdByUserId = null,
+}) {
+  const id = generateResellerClientId();
+  const apiKey = generateClientApiKey();
+  await db.run(
+    `INSERT INTO sms_reseller_clients
+      (id, provider_name, contact_name, contact_email, contact_phone, sell_rate_kes, status, notes, api_key, sender_id, brand_sender_name, created_by_user_id, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+    [
+      id,
+      providerName,
+      contactName || null,
+      contactEmail || null,
+      contactPhone || null,
+      Number(sellRateKes),
+      status || "active",
+      notes || "",
+      apiKey,
+      senderId || null,
+      brandSenderName || null,
+      createdByUserId,
+    ]
+  );
+  return getSmsResellerClientById(id, { includeFullApiKey: true });
+}
+
+export async function updateSmsResellerClientSender(id, { senderId, brandSenderName }) {
+  const existing = await db.get("SELECT id FROM sms_reseller_clients WHERE id = ?", [id]);
+  if (!existing) return null;
+  await db.run(
+    `UPDATE sms_reseller_clients SET
+      sender_id = COALESCE(?, sender_id),
+      brand_sender_name = COALESCE(?, brand_sender_name),
+      updated_at = CURRENT_TIMESTAMP
+     WHERE id = ?`,
+    [senderId ?? null, brandSenderName ?? null, id]
+  );
+  return getSmsResellerClientById(id);
+}
+
+export async function getSmsResellerClientById(
+  id,
+  { includeFullApiKey = false, includeGatewaySecrets = false } = {}
+) {
+  const row = await db.get("SELECT * FROM sms_reseller_clients WHERE id = ?", [id]);
+  return mapSmsResellerClientRow(row, { includeFullApiKey, includeGatewaySecrets });
+}
+
+export async function getSmsResellerClientByApiKey(apiKey) {
+  if (!apiKey) return null;
+  const row = await db.get("SELECT * FROM sms_reseller_clients WHERE api_key = ?", [
+    String(apiKey).trim(),
+  ]);
+  return mapSmsResellerClientRow(row);
+}
+
+export async function regenerateSmsResellerClientApiKey(id) {
+  const existing = await db.get("SELECT id FROM sms_reseller_clients WHERE id = ?", [id]);
+  if (!existing) return null;
+  const apiKey = generateClientApiKey();
+  await db.run(
+    "UPDATE sms_reseller_clients SET api_key = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+    [apiKey, id]
+  );
+  return getSmsResellerClientById(id, { includeFullApiKey: true });
+}
+
+/** Tenant-owned Traccar gateway (client's phone/SIM — not platform default). */
+export async function updateSmsResellerClientGateway(
+  id,
+  { gatewayUrl, gatewayApiKey, gatewayProvider = "traccar", gatewayMethod = "POST" }
+) {
+  const existing = await db.get("SELECT id FROM sms_reseller_clients WHERE id = ?", [id]);
+  if (!existing) return null;
+  await db.run(
+    `UPDATE sms_reseller_clients SET
+      gateway_url = ?,
+      gateway_api_key = ?,
+      gateway_provider = ?,
+      gateway_method = ?,
+      updated_at = CURRENT_TIMESTAMP
+     WHERE id = ?`,
+    [
+      gatewayUrl ? String(gatewayUrl).trim().replace(/\/$/, "") : null,
+      gatewayApiKey ? String(gatewayApiKey).trim() : null,
+      gatewayProvider || "traccar",
+      (gatewayMethod || "POST").toUpperCase(),
+      id,
+    ]
+  );
+  return getSmsResellerClientById(id);
+}
+
 export async function listSmsResellerClients() {
   const rows = await db.all("SELECT * FROM sms_reseller_clients ORDER BY created_at DESC");
-  return rows.map((row) => ({
-    id: row.id,
-    providerName: row.provider_name,
-    contactName: row.contact_name,
-    contactEmail: row.contact_email,
-    contactPhone: row.contact_phone,
-    sellRateKes: Number(row.sell_rate_kes),
-    status: row.status,
-    notes: row.notes || "",
-    createdByUserId: row.created_by_user_id,
-    createdAt: row.created_at ? new Date(row.created_at) : null,
-    updatedAt: row.updated_at ? new Date(row.updated_at) : null,
-  }));
+  return rows.map((row) => mapSmsResellerClientRow(row));
 }
 
 export async function createSmsResellerQuote({

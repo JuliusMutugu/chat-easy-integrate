@@ -1,6 +1,6 @@
-# SMS Reseller API Spec (Client-Facing)
+# SMS Reseller API Spec (Quick Reference)
 
-This is the document you share with organizations buying SMS from you.
+**Full integration guide for clients:** [SMS_CLIENT_API_INTEGRATION.md](./SMS_CLIENT_API_INTEGRATION.md)
 
 ## Base URL
 
@@ -8,17 +8,18 @@ This is the document you share with organizations buying SMS from you.
 
 ## Authentication
 
-Use API key as bearer token:
-
 `Authorization: Bearer <client-api-key>`
 
-## Content Type
+## Client endpoints (share with buyers)
 
-`Content-Type: application/json`
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/api/v1/account` | Verify API key and account status |
+| POST | `/api/v1/sms/send` | Send SMS |
 
 ## 1) Send SMS
 
-`POST /api/channels/sms/send`
+`POST /api/v1/sms/send`
 
 ### Request Body
 
@@ -61,14 +62,19 @@ Use API key as bearer token:
 - Send only to consented recipients
 - Implement rate limiting on client side for large bursts
 
-## Environment Requirements (Provider Side)
+## Environment Requirements (Provider Side – Traccar)
 
 ```env
-SMS_GATEWAY_URL=https://your-sms-router.example.com/send
-SMS_GATEWAY_API_KEY=optional-token
+SMS_GATEWAY_PROVIDER=traccar
+SMS_GATEWAY_URL=http://192.168.1.50:8082
+SMS_GATEWAY_API_KEY=token-from-traccar-app
 SMS_GATEWAY_METHOD=POST
+SMS_GATEWAY_QUEUE_MS=3000
 SMS_SELL_RATE_KES=0.30
 ```
+
+Traccar expects `Authorization: <token>` (not Bearer) and JSON body `{ "to": "+254...", "message": "..." }`.
+Messages are queued one at a time with a 3-second gap by default.
 
 ## Operational Notes
 
